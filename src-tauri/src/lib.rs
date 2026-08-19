@@ -80,6 +80,18 @@ pub fn run() {
                 )?;
             }
 
+            // 既存のシェルフアイテム（前回起動時に追加されたもの）についても、F-07プレビューの
+            // asset protocol読み込みに必要な分だけスコープを許可しておく（新規追加分は
+            // `commands::shelf::grant_preview_scope`で都度許可する。tauri.conf.jsonでは
+            // "**" のような包括スコープを敢えて置かず、実際に参照するパスだけを動的に許可する
+            // 設計にしている）。
+            {
+                let conn = db.0.lock().map_err(|_| ShelfError::Internal("内部ロックの取得に失敗しました".into()))?;
+                let existing_items = storage::shelf_repo::list_items(&conn)?;
+                drop(conn);
+                commands::shelf::grant_preview_scope(&app_handle, &existing_items);
+            }
+
             app.manage(AppState {
                 db,
                 clipboard_guard: clipboard::SelfWriteGuard::new(),

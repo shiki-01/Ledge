@@ -1,10 +1,10 @@
 //! シェルフ関連のTauriコマンド（architecture.md 3章 Phase1表）。
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::drag_drop;
 use crate::error::ShelfError;
-use crate::storage::models::ShelfItem;
+use crate::storage::models::{ShelfItem, ShelfItemType};
 use crate::storage::shelf_repo;
 use crate::AppState;
 
@@ -27,8 +27,29 @@ pub fn shelf_add_paths(
         let conn = state.db.0.lock().map_err(lock_err)?;
         shelf_repo::add_paths(&conn, &paths)?
     };
+    grant_preview_scope(&app, &added);
     notify_items_changed(&app);
     Ok(added)
+}
+
+/// F-07のプレビュー表示（asset protocol経由の画像読み込み）に必要な分だけ、シェルフアイテムの
+/// 実パスをasset protocolの許可スコープへ動的に追加する。
+///
+/// シェルフはユーザーがドラッグした任意のパスを参照する（`docs/requirements.md` 10.1章）ため
+/// 事前の静的allowlistでは絞り込めないが、`tauri.conf.json`に`"**"`のような包括的スコープを
+/// 置くとwebviewから任意のローカルファイルパスを読めてしまい攻撃対象範囲が不必要に広がる。
+/// そのため実際にシェルフへ追加された実ファイルのパスのみを都度許可する（フォルダはプレビュー
+/// 対象外のため許可しない）。失敗しても致命的ではないため警告ログに留める。
+pub(crate) fn grant_preview_scope(app: &AppHandle, items: &[ShelfItem]) {
+    let scope = app.asset_protocol_scope();
+    for item in items {
+        if item.item_type != ShelfItemType::File {
+            continue;
+        }
+        if let Err(e) = scope.allow_file(&item.source_path) {
+            tracing::warn!(path = %item.source_path, error = %e, "asset protocolスコープへの許可追加に失敗しました");
+        }
+    }
 }
 
 #[tauri::command]
