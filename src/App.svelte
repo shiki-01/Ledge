@@ -6,6 +6,7 @@
   import { shelfStore } from "./lib/stores/shelfStore";
   import { clipboardStore } from "./lib/stores/clipboardStore";
   import { settingsStore } from "./lib/stores/settingsStore";
+  import { tagsStore } from "./lib/stores/tagsStore";
 
   type Tab = "shelf" | "history" | "settings";
   let activeTab = $state<Tab>("shelf");
@@ -13,15 +14,18 @@
   // DB更新を伴うコマンドはRust側で`shelf://items-changed` / `clipboard://history-changed`をemitするので、
   // フロントはそれを購読して自動再取得する（ポーリング不要、architecture.md 3章）。
   // 設定変更（`settings://changed`）とトレイの「設定...」（`shelf://open-settings`）も同様に購読する。
+  // タグ一覧の増減（`tags://changed`）はPhase4 F-17で追加（architecture.md 9.3章）。
   $effect(() => {
     void shelfStore.refresh();
     void clipboardStore.refresh();
     void settingsStore.refresh();
+    void tagsStore.refresh();
 
     let unlistenShelf: UnlistenFn | undefined;
     let unlistenClipboard: UnlistenFn | undefined;
     let unlistenSettings: UnlistenFn | undefined;
     let unlistenOpenSettings: UnlistenFn | undefined;
+    let unlistenTags: UnlistenFn | undefined;
 
     void listen("shelf://items-changed", () => {
       void shelfStore.refresh();
@@ -48,11 +52,18 @@
       unlistenOpenSettings = fn;
     });
 
+    void listen("tags://changed", () => {
+      void tagsStore.refresh();
+    }).then((fn) => {
+      unlistenTags = fn;
+    });
+
     return () => {
       unlistenShelf?.();
       unlistenClipboard?.();
       unlistenSettings?.();
       unlistenOpenSettings?.();
+      unlistenTags?.();
     };
   });
 

@@ -1,3 +1,5 @@
+import type { Tag } from "./tags";
+
 /**
  * クリップボード履歴アイテムの内容種別。Rust側 `storage::models::ClipboardContentType` と対応する。
  */
@@ -18,4 +20,6 @@ export interface ClipboardEntry {
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
+  /** このエントリに付与されたタグ（Phase4, F-17） */
+  tags: Tag[];
 }

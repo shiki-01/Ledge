@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ShelfItem } from "../types/shelf";
 import type { AppSettings, AppSettingsPatch } from "../types/settings";
 import type { ClipboardEntry } from "../types/clipboard";
+import type { Tag } from "../types/tags";
 
 /** 起動時・表示時の一覧取得 */
 export function shelfListItems(): Promise<ShelfItem[]> {
@@ -37,9 +38,14 @@ export function shelfBeginDragOut(ids: number[]): Promise<void> {
   return invoke<void>("shelf_begin_drag_out", { ids });
 }
 
-/** 履歴取得（F-14の本格検索はPhase4だが、queryは簡易LIKE検索として先行して渡せる） */
-export function clipboardListHistory(query?: string): Promise<ClipboardEntry[]> {
-  return invoke<ClipboardEntry[]>("clipboard_list_history", { query });
+/** 履歴取得（F-14: queryはLIKEエスケープ済みの検索、F-17: tagIdでタグ絞り込み） */
+export function clipboardListHistory(query?: string, tagId?: number): Promise<ClipboardEntry[]> {
+  return invoke<ClipboardEntry[]>("clipboard_list_history", { query, tagId });
+}
+
+/** 複数のテキストアイテムを改行結合し、新規テキストエントリとして記録する（F-15） */
+export function clipboardStackEntries(ids: number[]): Promise<ClipboardEntry> {
+  return invoke<ClipboardEntry>("clipboard_stack_entries", { ids });
 }
 
 /** クリップボードへ書き戻す（F-12） */
@@ -60,6 +66,26 @@ export function clipboardDelete(id: number): Promise<void> {
 /** 一括削除（ピン留めアイテムを除外するかどうか） */
 export function clipboardClear(excludePinned: boolean): Promise<void> {
   return invoke<void>("clipboard_clear", { excludePinned });
+}
+
+/** タグ一覧取得（F-17） */
+export function tagsList(): Promise<Tag[]> {
+  return invoke<Tag[]>("tags_list");
+}
+
+/** タグ作成（name UNIQUE制約違反はShelfErrorのConflictとして返る） */
+export function tagsCreate(name: string, color?: string): Promise<Tag> {
+  return invoke<Tag>("tags_create", { name, color });
+}
+
+/** タグ削除（関連付けはON DELETE CASCADEで自動的に消える） */
+export function tagsDelete(id: number): Promise<void> {
+  return invoke<void>("tags_delete", { id });
+}
+
+/** 指定エントリのタグ付けを一括置き換えする */
+export function clipboardSetTags(id: number, tagIds: number[]): Promise<void> {
+  return invoke<void>("clipboard_set_tags", { id, tagIds });
 }
 
 /** 設定取得 */
