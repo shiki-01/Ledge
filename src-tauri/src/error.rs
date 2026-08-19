@@ -23,6 +23,9 @@ pub enum ShelfError {
     #[error("ドラッグ&ドロップ処理に失敗しました: {0}")]
     DragDropFailed(String),
 
+    #[error("{0}")]
+    Conflict(String),
+
     #[error("内部エラーが発生しました: {0}")]
     Internal(String),
 }
@@ -42,6 +45,7 @@ impl ShelfError {
             ShelfError::Settings(_) => "settings_error",
             ShelfError::Shortcut(_) => "shortcut_error",
             ShelfError::DragDropFailed(_) => "drag_drop_failed",
+            ShelfError::Conflict(_) => "conflict",
             ShelfError::Internal(_) => "internal_error",
         }
     }

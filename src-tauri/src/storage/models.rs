@@ -94,4 +94,19 @@ pub struct ClipboardEntry {
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// このエントリに付与されたタグ（Phase4, F-17）。`clipboard_tags`とのJOIN結果を
+    /// 一覧取得時にまとめて付与する（architecture.md 9.3章のコマンド一覧には無いが、
+    /// フロント側のタグチップ表示・タグ付けUIのため一覧取得結果に含める設計にした。
+    /// 迷った設計判断: 呼び出し元へ報告）。
+    pub tags: Vec<Tag>,
+}
+
+/// タグ（`tags`テーブルに対応、Phase4, F-17）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub id: i64,
+    pub name: String,
+    /// 自由入力のhexカラーコード文字列（`#RRGGBB`）。DB制約は設けない（architecture.md 9.3章）。
+    pub color: Option<String>,
 }

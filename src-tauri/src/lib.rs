@@ -137,6 +137,11 @@ pub fn run() {
             commands::clipboard::clipboard_set_pinned,
             commands::clipboard::clipboard_delete,
             commands::clipboard::clipboard_clear,
+            commands::clipboard::clipboard_stack_entries,
+            commands::tags::tags_list,
+            commands::tags::tags_create,
+            commands::tags::tags_delete,
+            commands::tags::clipboard_set_tags,
             commands::settings::get_settings,
             commands::settings::update_settings,
         ])

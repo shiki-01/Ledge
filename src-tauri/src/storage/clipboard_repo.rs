@@ -3,15 +3,16 @@
 //! 画像はDBにBLOB格納せず、呼び出し元から渡されるキャッシュディレクトリ配下にPNGファイルとして
 //! 保存し、パスのみDBに記録する（requirements.md 10.2章）。
 
+use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use crate::clipboard::ClipboardSnapshot;
 use crate::error::ShelfError;
 
-use super::models::{ClipboardContentType, ClipboardEntry};
+use super::models::{ClipboardContentType, ClipboardEntry, Tag};
 
 /// 重複排除・自己ループ防止の両方で使うcontent hashを計算する（requirements.md 10.2章）。
 /// テキストは前後空白を取り除いた内容、画像はPNGバイト列そのもの、ファイルパスは
@@ -38,22 +39,47 @@ pub fn content_hash(snapshot: &ClipboardSnapshot) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// 履歴一覧を取得する。`query`が指定されている場合はテキスト内容/ファイルパスに対する
-/// 簡易LIKE検索を行う（F-14の本格実装はPhase4だが、コマンド引数としては先行して受け付ける）。
+/// LIKE検索のワイルドカード文字（`%` `_`）とエスケープ文字自体（`\`）をエスケープする（F-14）。
+/// `LIKE ?1 ESCAPE '\'`と組み合わせることで、ユーザー入力中の`%`/`_`をリテラル文字として扱う
+/// （既知の課題の修正、architecture.md 9.1章）。
+fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+/// 履歴一覧を取得する。`query`が指定されている場合はテキスト内容/ファイルパス/タグ名に対する
+/// LIKE検索を行う（F-14, architecture.md 9.1章）。`tag_id`が指定されている場合はそのタグが
+/// 付与されたエントリのみに絞り込む（F-17）。
 /// ピン留めアイテムを先頭にまとめ、その中・それ以外それぞれ更新日時降順で並べる。
-pub fn list_history(conn: &Connection, query: Option<&str>) -> Result<Vec<ClipboardEntry>, ShelfError> {
+pub fn list_history(
+    conn: &Connection,
+    query: Option<&str>,
+    tag_id: Option<i64>,
+) -> Result<Vec<ClipboardEntry>, ShelfError> {
+    let like_param = query.map(|q| format!("%{}%", escape_like_pattern(q)));
+
     let mut stmt = conn
         .prepare(
-            "SELECT id, content_type, text_content, image_path, thumbnail_path, file_paths_json, \
-                    pinned, created_at, updated_at \
-             FROM clipboard_history \
-             WHERE (?1 IS NULL OR text_content LIKE '%' || ?1 || '%' OR file_paths_json LIKE '%' || ?1 || '%') \
-             ORDER BY pinned DESC, updated_at DESC, id DESC",
+            "SELECT DISTINCT ch.id, ch.content_type, ch.text_content, ch.image_path, ch.thumbnail_path, \
+                    ch.file_paths_json, ch.pinned, ch.created_at, ch.updated_at \
+             FROM clipboard_history ch \
+             LEFT JOIN clipboard_tags ct ON ct.clipboard_id = ch.id \
+             LEFT JOIN tags t ON t.id = ct.tag_id \
+             WHERE (?1 IS NULL OR ch.text_content LIKE ?1 ESCAPE '\\' \
+                    OR ch.file_paths_json LIKE ?1 ESCAPE '\\' OR t.name LIKE ?1 ESCAPE '\\') \
+               AND (?2 IS NULL OR ct.tag_id = ?2) \
+             ORDER BY ch.pinned DESC, ch.updated_at DESC, ch.id DESC",
         )
         .map_err(db_err)?;
 
     let rows = stmt
-        .query_map(params![query], |row| {
+        .query_map(params![like_param, tag_id], |row| {
             Ok(RawRow {
                 id: row.get(0)?,
                 content_type: row.get(1)?,
@@ -72,7 +98,7 @@ pub fn list_history(conn: &Connection, query: Option<&str>) -> Result<Vec<Clipbo
     for row in rows {
         entries.push(row.map_err(db_err)?.into_entry()?);
     }
-    Ok(entries)
+    attach_tags(conn, entries)
 }
 
 /// idを指定して1件取得する（F-12: 履歴からの貼り付け用）。
@@ -100,10 +126,100 @@ pub fn get_entry(conn: &Connection, id: i64) -> Result<ClipboardEntry, ShelfErro
         .optional()
         .map_err(db_err)?;
 
-    match row {
-        Some(row) => row.into_entry(),
-        None => Err(ShelfError::NotFound(format!("clipboard entry id={id}"))),
+    let entry = match row {
+        Some(row) => row.into_entry()?,
+        None => return Err(ShelfError::NotFound(format!("clipboard entry id={id}"))),
+    };
+
+    attach_tags(conn, vec![entry])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ShelfError::NotFound(format!("clipboard entry id={id}")))
+}
+
+/// 複数のテキストエントリを改行結合し、新規テキストエントリとして記録する（F-15）。
+/// 対象は`content_type = 'text'`のみ。`ids`の並び順（一覧の表示順に対応、architecture.md 9.2章）
+/// で結合する。元アイテムは削除しない（結合はコピーであり移動ではない、という裁量判断）。
+pub fn stack_entries(conn: &Connection, cache_dir: &Path, ids: &[i64]) -> Result<ClipboardEntry, ShelfError> {
+    if ids.len() < 2 {
+        return Err(ShelfError::Internal("スタックには2件以上のテキストアイテムを選択してください".into()));
     }
+
+    let mut texts = Vec::with_capacity(ids.len());
+    for id in ids {
+        let row: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT content_type, text_content FROM clipboard_history WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(db_err)?;
+
+        let (content_type, text_content) =
+            row.ok_or_else(|| ShelfError::NotFound(format!("clipboard entry id={id}")))?;
+
+        if content_type != ClipboardContentType::Text.as_db_str() {
+            return Err(ShelfError::Internal(
+                "テキスト以外のアイテムはスタック（結合）できません".into(),
+            ));
+        }
+        texts.push(text_content.unwrap_or_default());
+    }
+
+    let snapshot = ClipboardSnapshot::Text(texts.join("\n"));
+    let hash = content_hash(&snapshot);
+    record_entry(conn, cache_dir, &snapshot, &hash)?;
+
+    let new_id: i64 = conn
+        .query_row(
+            "SELECT id FROM clipboard_history WHERE content_hash = ?1",
+            params![hash],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+
+    get_entry(conn, new_id)
+}
+
+/// 一覧取得結果にタグを付与する（1クエリで対象id全件分をまとめて取得する）。
+fn attach_tags(conn: &Connection, mut entries: Vec<ClipboardEntry>) -> Result<Vec<ClipboardEntry>, ShelfError> {
+    if entries.is_empty() {
+        return Ok(entries);
+    }
+
+    let ids: Vec<i64> = entries.iter().map(|e| e.id).collect();
+    let placeholders = vec!["?"; ids.len()].join(",");
+    let sql = format!(
+        "SELECT ct.clipboard_id, t.id, t.name, t.color FROM clipboard_tags ct \
+         JOIN tags t ON t.id = ct.tag_id WHERE ct.clipboard_id IN ({placeholders}) ORDER BY t.name ASC"
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(db_err)?;
+    let rows = stmt
+        .query_map(params_from_iter(ids.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                Tag {
+                    id: row.get(1)?,
+                    name: row.get(2)?,
+                    color: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(db_err)?;
+
+    let mut tags_by_clipboard_id: HashMap<i64, Vec<Tag>> = HashMap::new();
+    for row in rows {
+        let (clipboard_id, tag) = row.map_err(db_err)?;
+        tags_by_clipboard_id.entry(clipboard_id).or_default().push(tag);
+    }
+
+    for entry in &mut entries {
+        entry.tags = tags_by_clipboard_id.remove(&entry.id).unwrap_or_default();
+    }
+
+    Ok(entries)
 }
 
 /// 監視で検知したクリップボードの内容を記録する。
@@ -302,6 +418,7 @@ impl RawRow {
             pinned: self.pinned != 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            tags: Vec::new(),
         })
     }
 }
@@ -358,7 +475,7 @@ mod tests {
         let hash = content_hash(&snapshot);
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
 
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].text_content.as_deref(), Some("hello"));
         assert!(!entries[0].pinned);
@@ -374,7 +491,7 @@ mod tests {
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
 
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         assert_eq!(entries.len(), 1, "同一内容は新規行を作らず1件のままのはず");
     }
 
@@ -386,12 +503,12 @@ mod tests {
         let snapshot = ClipboardSnapshot::Text("keep-pin".to_string());
         let hash = content_hash(&snapshot);
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
-        let id = list_history(&conn, None).unwrap()[0].id;
+        let id = list_history(&conn, None, None).unwrap()[0].id;
         set_pinned(&conn, id, true).unwrap();
 
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
 
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].pinned, "重複記録後もピン留め状態が保持されるはず");
     }
@@ -406,7 +523,7 @@ mod tests {
         let hash = content_hash(&snapshot);
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
 
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         let image_path = entries[0].image_path.clone().unwrap();
         assert!(PathBuf::from(&image_path).exists());
     }
@@ -419,12 +536,12 @@ mod tests {
         let snapshot = ClipboardSnapshot::Image(vec![9, 9, 9]);
         let hash = content_hash(&snapshot);
         record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         let image_path = entries[0].image_path.clone().unwrap();
 
         delete_entry(&conn, entries[0].id).unwrap();
 
-        assert!(list_history(&conn, None).unwrap().is_empty());
+        assert!(list_history(&conn, None, None).unwrap().is_empty());
         assert!(!PathBuf::from(&image_path).exists());
     }
 
@@ -435,13 +552,13 @@ mod tests {
 
         record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("a".into()), &content_hash(&ClipboardSnapshot::Text("a".into()))).unwrap();
         record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("b".into()), &content_hash(&ClipboardSnapshot::Text("b".into()))).unwrap();
-        let entries = list_history(&conn, None).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
         let pinned_id = entries.iter().find(|e| e.text_content.as_deref() == Some("a")).unwrap().id;
         set_pinned(&conn, pinned_id, true).unwrap();
 
         clear(&conn, true).unwrap();
 
-        let remaining = list_history(&conn, None).unwrap();
+        let remaining = list_history(&conn, None, None).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].text_content.as_deref(), Some("a"));
     }
@@ -460,7 +577,7 @@ mod tests {
 
         enforce_retention(&conn, 3, 30).unwrap();
 
-        let remaining = list_history(&conn, None).unwrap();
+        let remaining = list_history(&conn, None, None).unwrap();
         assert_eq!(remaining.len(), 3, "件数上限を超えた分は削除されるはず");
     }
 
@@ -472,8 +589,74 @@ mod tests {
         record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("apple pie".into()), &content_hash(&ClipboardSnapshot::Text("apple pie".into()))).unwrap();
         record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("banana".into()), &content_hash(&ClipboardSnapshot::Text("banana".into()))).unwrap();
 
-        let results = list_history(&conn, Some("apple")).unwrap();
+        let results = list_history(&conn, Some("apple"), None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].text_content.as_deref(), Some("apple pie"));
+    }
+
+    #[test]
+    fn list_history_query_escapes_like_wildcards() {
+        // F-14既知の課題の修正確認: "%"/"_"がワイルドカードとして展開されず、リテラルとして扱われること
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("50% off".into()), &content_hash(&ClipboardSnapshot::Text("50% off".into()))).unwrap();
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("50 dollars off".into()), &content_hash(&ClipboardSnapshot::Text("50 dollars off".into()))).unwrap();
+
+        let results = list_history(&conn, Some("50%"), None).unwrap();
+        assert_eq!(results.len(), 1, "'%'はワイルドカードではなくリテラル文字として一致するはず");
+        assert_eq!(results[0].text_content.as_deref(), Some("50% off"));
+    }
+
+    #[test]
+    fn list_history_filters_by_tag_id() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("tagged".into()), &content_hash(&ClipboardSnapshot::Text("tagged".into()))).unwrap();
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("untagged".into()), &content_hash(&ClipboardSnapshot::Text("untagged".into()))).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
+        let tagged_id = entries.iter().find(|e| e.text_content.as_deref() == Some("tagged")).unwrap().id;
+
+        let tag = crate::storage::tags_repo::create_tag(&conn, "work", None).unwrap();
+        crate::storage::tags_repo::set_clipboard_tags(&conn, tagged_id, &[tag.id]).unwrap();
+
+        let filtered = list_history(&conn, None, Some(tag.id)).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, tagged_id);
+        assert_eq!(filtered[0].tags.len(), 1);
+        assert_eq!(filtered[0].tags[0].name, "work");
+    }
+
+    #[test]
+    fn stack_entries_combines_text_items_in_order_without_deleting_originals() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("first".into()), &content_hash(&ClipboardSnapshot::Text("first".into()))).unwrap();
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("second".into()), &content_hash(&ClipboardSnapshot::Text("second".into()))).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
+        let first_id = entries.iter().find(|e| e.text_content.as_deref() == Some("first")).unwrap().id;
+        let second_id = entries.iter().find(|e| e.text_content.as_deref() == Some("second")).unwrap().id;
+
+        let stacked = stack_entries(&conn, &cache.0, &[first_id, second_id]).unwrap();
+        assert_eq!(stacked.text_content.as_deref(), Some("first\nsecond"));
+
+        let all = list_history(&conn, None, None).unwrap();
+        assert_eq!(all.len(), 3, "元の2件は削除されず、結合結果が新規1件として追加されるはず");
+    }
+
+    #[test]
+    fn stack_entries_rejects_non_text_items() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Text("text".into()), &content_hash(&ClipboardSnapshot::Text("text".into()))).unwrap();
+        record_entry(&conn, &cache.0, &ClipboardSnapshot::Image(vec![1, 2, 3]), &content_hash(&ClipboardSnapshot::Image(vec![1, 2, 3]))).unwrap();
+        let entries = list_history(&conn, None, None).unwrap();
+        let ids: Vec<i64> = entries.iter().map(|e| e.id).collect();
+
+        let result = stack_entries(&conn, &cache.0, &ids);
+        assert!(result.is_err(), "画像アイテムを含む場合はエラーになるはず");
     }
 }

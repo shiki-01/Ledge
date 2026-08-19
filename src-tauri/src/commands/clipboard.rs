@@ -17,9 +17,26 @@ const EVENT_HISTORY_CHANGED: &str = "clipboard://history-changed";
 pub fn clipboard_list_history(
     state: State<'_, AppState>,
     query: Option<String>,
+    tag_id: Option<i64>,
 ) -> Result<Vec<ClipboardEntry>, ShelfError> {
     let conn = state.db.0.lock().map_err(lock_err)?;
-    clipboard_repo::list_history(&conn, query.as_deref())
+    clipboard_repo::list_history(&conn, query.as_deref(), tag_id)
+}
+
+/// 複数のテキストアイテムを改行結合し、新規テキストエントリとして記録する（F-15）。
+/// 対象は`content_type == 'text'`のみ。元アイテムは削除しない（architecture.md 9.2章）。
+#[tauri::command]
+pub fn clipboard_stack_entries(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<ClipboardEntry, ShelfError> {
+    let entry = {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        clipboard_repo::stack_entries(&conn, &state.clipboard_cache_dir, &ids)?
+    };
+    notify_history_changed(&app);
+    Ok(entry)
 }
 
 /// 履歴アイテムをクリップボードへ書き戻す（F-12）。
@@ -155,7 +172,8 @@ pub(crate) fn handle_clipboard_change(app: &AppHandle, snapshot: ClipboardSnapsh
     }
 }
 
-fn notify_history_changed(app: &AppHandle) {
+/// `commands::tags`からもタグ付け変更時の通知に使うため`pub(crate)`にしている。
+pub(crate) fn notify_history_changed(app: &AppHandle) {
     // フロントは購読して自動再取得するのみなので、送信失敗（購読者なし等）は無視してよい
     let _ = app.emit(EVENT_HISTORY_CHANGED, ());
 }

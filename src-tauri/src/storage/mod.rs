@@ -8,3 +8,4 @@ pub mod clipboard_repo;
 pub mod db;
 pub mod models;
 pub mod shelf_repo;
+pub mod tags_repo;

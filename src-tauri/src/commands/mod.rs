@@ -3,3 +3,4 @@
 pub mod clipboard;
 pub mod settings;
 pub mod shelf;
+pub mod tags;
