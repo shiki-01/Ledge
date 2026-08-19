@@ -6,6 +6,7 @@
 
 pub mod clipboard_repo;
 pub mod db;
+pub mod favorite_folder_repo;
 pub mod models;
 pub mod shelf_repo;
 pub mod tags_repo;

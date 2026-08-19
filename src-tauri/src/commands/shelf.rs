@@ -2,6 +2,7 @@
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::compress;
 use crate::drag_drop;
 use crate::error::ShelfError;
 use crate::storage::models::{ShelfItem, ShelfItemType};
@@ -111,6 +112,60 @@ pub fn shelf_begin_drag_out(
 
     let source = drag_drop::create_drag_out_source(app);
     source.begin_drag(paths)
+}
+
+/// パスをクリップボードへコピーする（F-21右クリックメニュー）。
+///
+/// `clipboard_paste_to_active`と異なり`clipboard_guard`はかけない。通常の外部コピーと同様に
+/// クリップボード履歴（F-11）へ自然に記録されてよい、という判断（architecture.md 12.2章）。
+#[tauri::command]
+pub fn shelf_copy_path(state: State<'_, AppState>, id: i64) -> Result<(), ShelfError> {
+    let item = {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        shelf_repo::get_item(&conn, id)?
+    };
+
+    let mut clipboard = arboard::Clipboard::new().map_err(clipboard_err)?;
+    clipboard.set_text(item.source_path).map_err(clipboard_err)?;
+    Ok(())
+}
+
+/// 対象アイテムをZIP圧縮し、新規シェルフアイテムとして追加する（F-21右クリックメニュー）。
+///
+/// 圧縮処理自体はDBアクセスを伴わない（`compress`モジュール参照）ため、フォルダが大きい場合に
+/// DBロックを長時間保持しないよう、取得・圧縮・追加でそれぞれ個別にロックを取得する
+/// （迷った設計判断: 呼び出し元へ報告）。
+#[tauri::command]
+pub fn shelf_compress_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<ShelfItem, ShelfError> {
+    let target = {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        shelf_repo::get_item(&conn, id)?
+    };
+
+    let zip_path = compress::compress_to_zip(
+        std::path::Path::new(&target.source_path),
+        &target.display_name,
+    )?;
+    let zip_path_str = zip_path.to_string_lossy().to_string();
+
+    let added = {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        let mut added = shelf_repo::add_paths(&conn, &[zip_path_str])?;
+        added
+            .pop()
+            .ok_or_else(|| ShelfError::Internal("圧縮後のシェルフアイテム追加に失敗しました".into()))?
+    };
+    grant_preview_scope(&app, std::slice::from_ref(&added));
+    notify_items_changed(&app);
+    Ok(added)
+}
+
+fn clipboard_err(e: arboard::Error) -> ShelfError {
+    ShelfError::Internal(format!("クリップボードへのアクセスに失敗しました: {e}"))
 }
 
 fn notify_items_changed(app: &AppHandle) {

@@ -7,6 +7,7 @@
   import { clipboardStore } from "./lib/stores/clipboardStore";
   import { settingsStore } from "./lib/stores/settingsStore";
   import { tagsStore } from "./lib/stores/tagsStore";
+  import { favoritesStore } from "./lib/stores/favoritesStore";
   import {
     startClipboardSync,
     stopClipboardSync,
@@ -22,17 +23,20 @@
   // フロントはそれを購読して自動再取得する（ポーリング不要、architecture.md 3章）。
   // 設定変更（`settings://changed`）とトレイの「設定...」（`shelf://open-settings`）も同様に購読する。
   // タグ一覧の増減（`tags://changed`）はPhase4 F-17で追加（architecture.md 9.3章）。
+  // よく使うフォルダの増減（`favorites://changed`）はPhase6 F-09で追加（architecture.md 12.1章）。
   $effect(() => {
     void shelfStore.refresh();
     void clipboardStore.refresh();
     void settingsStore.refresh();
     void tagsStore.refresh();
+    void favoritesStore.refresh();
 
     let unlistenShelf: UnlistenFn | undefined;
     let unlistenClipboard: UnlistenFn | undefined;
     let unlistenSettings: UnlistenFn | undefined;
     let unlistenOpenSettings: UnlistenFn | undefined;
     let unlistenTags: UnlistenFn | undefined;
+    let unlistenFavorites: UnlistenFn | undefined;
 
     void listen("shelf://items-changed", () => {
       void shelfStore.refresh();
@@ -71,12 +75,19 @@
       unlistenTags = fn;
     });
 
+    void listen("favorites://changed", () => {
+      void favoritesStore.refresh();
+    }).then((fn) => {
+      unlistenFavorites = fn;
+    });
+
     return () => {
       unlistenShelf?.();
       unlistenClipboard?.();
       unlistenSettings?.();
       unlistenOpenSettings?.();
       unlistenTags?.();
+      unlistenFavorites?.();
     };
   });
 

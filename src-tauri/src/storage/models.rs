@@ -50,6 +50,22 @@ pub struct ShelfItem {
     pub modified_at_ms: Option<i64>,
 }
 
+/// よく使うフォルダ（`favorite_folders`テーブルに対応、Phase6, F-09）。
+///
+/// `shelf_items`と異なり常時表示するブックマークのため独立テーブルとして持つ
+/// （architecture.md 12.1章）。`missing`は`ShelfItem`と同様DBには保存せず、
+/// 一覧取得のたびにディレクトリの存在チェックを行って算出する。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteFolder {
+    pub id: i64,
+    pub folder_path: String,
+    pub display_name: String,
+    pub sort_order: i64,
+    pub added_at: String,
+    pub missing: bool,
+}
+
 /// クリップボード履歴アイテムの内容種別（Phase2, F-11）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

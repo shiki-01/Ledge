@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "シェルフウィンドウ（メインウィンドウ）に対する既定のパーミッション。Phase1ではフロントエンドから直接プラグインのIPCコマンドを呼び出す箇所が無く（グローバルショートカット・設定ストアはいずれもRust側のみで完結する）、自前のTauriコマンドはcoreの既定権限があれば呼び出せるため、core:defaultのみを許可する。",
+  "description": "シェルフウィンドウ（メインウィンドウ）に対する既定のパーミッション。Phase1〜5では自前のTauriコマンドがcoreの既定権限だけで完結していたためcore:defaultのみを許可していたが、Phase6でフロントエンドから直接プラグインのIPCコマンドを呼ぶ箇所（F-09のフォルダ選択ダイアログ、F-21のExplorer/Finder表示）が追加されたためdialog:default/opener:defaultを追加した。",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default", "opener:default"]
 }

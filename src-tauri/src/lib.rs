@@ -3,6 +3,7 @@
 
 pub mod clipboard;
 pub mod commands;
+pub mod compress;
 pub mod drag_drop;
 pub mod drag_watch;
 pub mod error;
@@ -47,7 +48,11 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
-        ));
+        ))
+        // F-09（よく使うフォルダ登録）: フォルダ選択ダイアログ。公式・クロスプラットフォーム対応。
+        .plugin(tauri_plugin_dialog::init())
+        // F-21（右クリックメニュー）:「エクスプローラー/Finderで表示」用。公式・クロスプラットフォーム対応。
+        .plugin(tauri_plugin_opener::init());
 
     // F-03（アウトバウンドドラッグ）用プラグイン。Rust側からは`drag`クレートを直接呼んでいるため
     // 必須ではないが、将来フロントエンドから直接ドラッグを開始したくなった場合に備えて登録しておく
@@ -132,6 +137,12 @@ pub fn run() {
             commands::shelf::shelf_set_locked,
             commands::shelf::shelf_clear,
             commands::shelf::shelf_begin_drag_out,
+            commands::shelf::shelf_copy_path,
+            commands::shelf::shelf_compress_item,
+            commands::favorites::favorites_list,
+            commands::favorites::favorites_add,
+            commands::favorites::favorites_remove,
+            commands::favorites::favorites_begin_drag_out,
             commands::clipboard::clipboard_list_history,
             commands::clipboard::clipboard_paste_to_active,
             commands::clipboard::clipboard_set_pinned,

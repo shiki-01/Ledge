@@ -32,6 +32,13 @@ tracing-appender = "0.2"
 sha2 = "0.10.9"
 image = { version = "0.25.6", default-features = false, features = ["png", "tiff"] }
 arboard = "3.6.1"
+# F-09（よく使うフォルダ登録）用フォルダ選択ダイアログ。公式・クロスプラットフォーム対応のためtarget cfgなし。
+tauri-plugin-dialog = "2"
+# F-21（右クリックメニュー）の「エクスプローラー/Finderで表示」用。公式・クロスプラットフォーム対応。
+tauri-plugin-opener = "2"
+# F-21「圧縮してシェルフに追加」用。OS分岐不要、この開発コンテナでもコンパイル・テスト可能
+# （architecture.md 12.2章）。
+zip = "2"
 
 # F-03（アウトバウンドドラッグ）用。Windows/macOSのみで使用し、Linux開発環境ではdev_stubを使うため
 # 依存自体をtarget cfgで絞り込み、この開発コンテナのビルドに影響しないようにする（architecture.md 4.2章）

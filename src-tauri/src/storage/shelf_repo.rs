@@ -42,6 +42,36 @@ pub fn list_items(conn: &Connection) -> Result<Vec<ShelfItem>, ShelfError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(db_err)
 }
 
+/// 個別取得（F-21右クリックメニュー用: パスコピー・圧縮対象の解決に使う）。
+pub fn get_item(conn: &Connection, id: i64) -> Result<ShelfItem, ShelfError> {
+    conn.query_row(
+        "SELECT id, item_type, source_path, display_name, size_bytes, locked, sort_order, added_at \
+         FROM shelf_items WHERE id = ?1",
+        params![id],
+        |row| {
+            let item_type: String = row.get(1)?;
+            let source_path: String = row.get(2)?;
+            let locked: i64 = row.get(5)?;
+            let modified_at_ms = read_modified_at_ms(Path::new(&source_path));
+            Ok(ShelfItem {
+                id: row.get(0)?,
+                item_type: ShelfItemType::from_db_str(&item_type),
+                missing: !Path::new(&source_path).exists(),
+                source_path,
+                display_name: row.get(3)?,
+                size_bytes: row.get(4)?,
+                locked: locked != 0,
+                sort_order: row.get(6)?,
+                added_at: row.get(7)?,
+                modified_at_ms,
+            })
+        },
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| ShelfError::NotFound(format!("shelf item id={id}")))
+}
+
 /// パス群をシェルフへ追加する。
 ///
 /// 同一パスの再ドロップも許可し、それぞれ別アイテムとして追加する
@@ -227,6 +257,26 @@ mod tests {
 
         let items = list_items(&conn).unwrap();
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn get_item_returns_matching_row() {
+        let db = setup();
+        let conn = db.0.lock().unwrap();
+
+        let added = add_paths(&conn, &["/tmp/example.txt".to_string()]).unwrap();
+        let fetched = get_item(&conn, added[0].id).unwrap();
+        assert_eq!(fetched.id, added[0].id);
+        assert_eq!(fetched.display_name, "example.txt");
+    }
+
+    #[test]
+    fn get_item_errors_when_not_found() {
+        let db = setup();
+        let conn = db.0.lock().unwrap();
+
+        let result = get_item(&conn, 999);
+        assert!(matches!(result, Err(ShelfError::NotFound(_))));
     }
 
     #[test]

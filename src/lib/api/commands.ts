@@ -7,6 +7,7 @@ import type { ShelfItem } from "../types/shelf";
 import type { AppSettings, AppSettingsPatch } from "../types/settings";
 import type { ClipboardEntry } from "../types/clipboard";
 import type { Tag } from "../types/tags";
+import type { FavoriteFolder } from "../types/favorites";
 
 /** 起動時・表示時の一覧取得 */
 export function shelfListItems(): Promise<ShelfItem[]> {
@@ -36,6 +37,36 @@ export function shelfClear(excludeLocked: boolean): Promise<void> {
 /** シェルフ→外部アプリへのネイティブドラッグ開始（F-03） */
 export function shelfBeginDragOut(ids: number[]): Promise<void> {
   return invoke<void>("shelf_begin_drag_out", { ids });
+}
+
+/** パスをクリップボードへコピーする（F-21右クリックメニュー） */
+export function shelfCopyPath(id: number): Promise<void> {
+  return invoke<void>("shelf_copy_path", { id });
+}
+
+/** 対象をZIP圧縮し、新規シェルフアイテムとして追加する（F-21右クリックメニュー） */
+export function shelfCompressItem(id: number): Promise<ShelfItem> {
+  return invoke<ShelfItem>("shelf_compress_item", { id });
+}
+
+/** よく使うフォルダの一覧取得（F-09） */
+export function favoritesList(): Promise<FavoriteFolder[]> {
+  return invoke<FavoriteFolder[]>("favorites_list");
+}
+
+/** よく使うフォルダへ登録する（F-09。重複パスはShelfErrorのConflictとして返る） */
+export function favoritesAdd(path: string): Promise<FavoriteFolder> {
+  return invoke<FavoriteFolder>("favorites_add", { path });
+}
+
+/** よく使うフォルダから削除する（F-09） */
+export function favoritesRemove(id: number): Promise<void> {
+  return invoke<void>("favorites_remove", { id });
+}
+
+/** よく使うフォルダ→外部アプリへのネイティブドラッグ開始（F-09、F-03のDragOutSourceを流用） */
+export function favoritesBeginDragOut(id: number): Promise<void> {
+  return invoke<void>("favorites_begin_drag_out", { id });
 }
 
 /** 履歴取得（F-14: queryはLIKEエスケープ済みの検索、F-17: tagIdでタグ絞り込み） */

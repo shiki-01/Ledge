@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import ShelfItem from "./ShelfItem.svelte";
+  import FavoriteFolders from "./FavoriteFolders.svelte";
   import { shelfStore } from "../stores/shelfStore";
   import {
     shelfAddPaths,
@@ -114,6 +115,8 @@
     <div class="shelf__toast" role="alert">{errorMessage}</div>
   {/if}
 
+  <FavoriteFolders onError={showError} />
+
   <ul class="shelf__list">
     {#each $shelfStore as item (item.id)}
       <li>
@@ -122,6 +125,7 @@
           onRemove={() => handleRemove(item.id)}
           onDragOut={() => handleDragOut(item.id)}
           onToggleLock={() => handleToggleLock(item.id, item.locked)}
+          onError={showError}
         />
       </li>
     {/each}
