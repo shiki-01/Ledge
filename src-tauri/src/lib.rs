@@ -138,6 +138,8 @@ pub fn run() {
             commands::clipboard::clipboard_delete,
             commands::clipboard::clipboard_clear,
             commands::clipboard::clipboard_stack_entries,
+            commands::clipboard::clipboard_sync_upsert_from_cloud,
+            commands::clipboard::clipboard_sync_unpin_by_hash,
             commands::tags::tags_list,
             commands::tags::tags_create,
             commands::tags::tags_delete,

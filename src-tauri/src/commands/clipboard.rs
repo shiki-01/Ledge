@@ -113,6 +113,41 @@ pub fn clipboard_set_pinned(
     Ok(())
 }
 
+/// F-22（デバイス間同期）: クラウド（Firestore）側の変更をローカルへ反映する（pull）。
+/// 同期エンジン本体はOS非依存のためフロント（`src/lib/sync/clipboardSync.ts`）に置いており、
+/// `onSnapshot`のリアルタイムリスナーからこのコマンドが呼ばれる（architecture.md 10.2章）。
+#[tauri::command]
+pub fn clipboard_sync_upsert_from_cloud(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    content_hash: String,
+    text_content: String,
+    updated_at: String,
+) -> Result<(), ShelfError> {
+    {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        clipboard_repo::sync_upsert_from_cloud(&conn, &content_hash, &text_content, &updated_at)?;
+    }
+    notify_history_changed(&app);
+    Ok(())
+}
+
+/// F-22（デバイス間同期）: クラウド側でドキュメントが削除されたことをローカルへ反映する（pull）。
+/// 該当行は削除せず`pinned = false`にするのみ（安全側の設計判断、architecture.md 10.2章）。
+#[tauri::command]
+pub fn clipboard_sync_unpin_by_hash(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    content_hash: String,
+) -> Result<(), ShelfError> {
+    {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        clipboard_repo::sync_unpin_by_hash(&conn, &content_hash)?;
+    }
+    notify_history_changed(&app);
+    Ok(())
+}
+
 /// 個別削除。
 #[tauri::command]
 pub fn clipboard_delete(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), ShelfError> {

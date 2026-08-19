@@ -7,6 +7,13 @@
   import { clipboardStore } from "./lib/stores/clipboardStore";
   import { settingsStore } from "./lib/stores/settingsStore";
   import { tagsStore } from "./lib/stores/tagsStore";
+  import {
+    startClipboardSync,
+    stopClipboardSync,
+    pushPinnedTextEntries,
+    isApplyingRemoteChange,
+  } from "./lib/sync/clipboardSync";
+  import type { FirebaseConfig } from "./lib/types/settings";
 
   type Tab = "shelf" | "history" | "settings";
   let activeTab = $state<Tab>("shelf");
@@ -35,6 +42,12 @@
 
     void listen("clipboard://history-changed", () => {
       void clipboardStore.refresh();
+      // F-22（デバイス間同期）: pull（クラウド→ローカル反映）由来の変更をそのままpushし返すと
+      // 無限ループになるため、pull処理中はpushをスキップする（isApplyingRemoteChange、
+      // 迷った設計判断はclipboardSync.ts参照）。
+      if (!isApplyingRemoteChange()) {
+        void pushPinnedTextEntries();
+      }
     }).then((fn) => {
       unlistenClipboard = fn;
     });
@@ -69,6 +82,36 @@
 
   // F-10: 透明度はウィンドウ全体ではなく背景要素へのCSS適用で反映する（architecture.md 8.2章）
   const backgroundOpacity = $derived($settingsStore?.opacity ?? 0.85);
+
+  // F-22（デバイス間同期）: syncEnabled かつ Firebase構成一式が揃っている場合のみ同期エンジンを
+  // 起動する。設定オブジェクト全体を`$effect`内で読むと無関係な設定変更（透明度など）のたびに
+  // リスナーを張り直してしまうため、関連フィールドだけを`$derived`でまとめた署名文字列を作り、
+  // それが変化したときだけ`$effect`を再実行する（迷った設計判断: 呼び出し元へ報告）。
+  const syncConfigSignature = $derived.by(() => {
+    const s = $settingsStore;
+    if (!s?.syncEnabled || !s.firebaseApiKey || !s.firebaseAuthDomain || !s.firebaseProjectId || !s.firebaseAppId) {
+      return null;
+    }
+    const config: FirebaseConfig = {
+      apiKey: s.firebaseApiKey,
+      authDomain: s.firebaseAuthDomain,
+      projectId: s.firebaseProjectId,
+      appId: s.firebaseAppId,
+    };
+    return JSON.stringify(config);
+  });
+
+  $effect(() => {
+    const signature = syncConfigSignature;
+    if (signature) {
+      void startClipboardSync(JSON.parse(signature) as FirebaseConfig);
+    } else {
+      stopClipboardSync();
+    }
+    return () => {
+      stopClipboardSync();
+    };
+  });
 </script>
 
 <div class="app" style={`--shelf-bg-opacity: ${backgroundOpacity}`}>

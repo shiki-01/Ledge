@@ -20,6 +20,13 @@ export interface ClipboardEntry {
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * 重複排除用のcontent hash。F-22（デバイス間同期）でFirestoreドキュメントIDとして
+   * そのまま流用するため公開している（`src/lib/sync/clipboardSync.ts`が使用、
+   * architecture.md 10.2章。以前は「フロントに公開する必要が無い」として含めていなかった
+   * フィールドだが、同期エンジン追加に伴い公開する方針に変更した）。
+   */
+  contentHash: string;
   /** このエントリに付与されたタグ（Phase4, F-17） */
   tags: Tag[];
 }

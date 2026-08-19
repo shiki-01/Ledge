@@ -106,3 +106,23 @@ export function updateSettings(patch: AppSettingsPatch): Promise<AppSettings> {
 export function syncSetFirebasePassword(password: string): Promise<void> {
   return invoke<void>("sync_set_firebase_password", { password });
 }
+
+/**
+ * F-22（デバイス間同期）: クラウド（Firestore）側のドキュメント追加/更新をローカルへ反映する（pull）。
+ * `src/lib/sync/clipboardSync.ts`の`onSnapshot`リスナーから呼ばれる。
+ */
+export function clipboardSyncUpsertFromCloud(
+  contentHash: string,
+  textContent: string,
+  updatedAt: string,
+): Promise<void> {
+  return invoke<void>("clipboard_sync_upsert_from_cloud", { contentHash, textContent, updatedAt });
+}
+
+/**
+ * F-22（デバイス間同期）: クラウド側でドキュメントが削除されたことをローカルへ反映する（pull）。
+ * 該当エントリは削除せず`pinned = false`にするのみ（安全側の設計判断、architecture.md 10.2章）。
+ */
+export function clipboardSyncUnpinByHash(contentHash: string): Promise<void> {
+  return invoke<void>("clipboard_sync_unpin_by_hash", { contentHash });
+}

@@ -79,8 +79,13 @@ impl ClipboardContentType {
 
 /// クリップボード履歴の1件（`clipboard_history`テーブルに対応、Phase2）。
 ///
-/// `content_hash`は重複排除専用の内部キーであり、フロントエンドに公開する必要が無いため
-/// この構造体には含めない（architecture.md 2章のDDLにはカラムとして存在する）。
+/// `content_hash`はもともと重複排除専用の内部キーとしてフロントエンドに公開していなかったが、
+/// F-22（デバイス間同期）でFirestoreドキュメントIDとして`content_hash`をそのまま流用する設計
+/// （architecture.md 10.2章）にしたため、同期エンジン（`src/lib/sync/clipboardSync.ts`）が
+/// pushのdiff計算に使えるようこの構造体にも公開する（迷った設計判断: 呼び出し元へ報告。
+/// TypeScript側でSHA-256アルゴリズムを再実装してRust側と同じハッシュ値を得る代替案もあったが、
+/// 実装の二重化によるアルゴリズム不一致のリスクを避けるため、既存のDBカラムをそのまま
+/// 公開する方を選んだ）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardEntry {
@@ -94,6 +99,8 @@ pub struct ClipboardEntry {
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// 重複排除・F-22同期のFirestoreドキュメントIDに使うcontent hash（上記コメント参照）。
+    pub content_hash: String,
     /// このエントリに付与されたタグ（Phase4, F-17）。`clipboard_tags`とのJOIN結果を
     /// 一覧取得時にまとめて付与する（architecture.md 9.3章のコマンド一覧には無いが、
     /// フロント側のタグチップ表示・タグ付けUIのため一覧取得結果に含める設計にした。

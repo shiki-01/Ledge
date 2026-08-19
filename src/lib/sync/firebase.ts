@@ -1,28 +1,42 @@
 /**
- * F-22（デバイス間同期）: Bring Your Own Firebase方式の疎通確認ロジック（architecture.md 10.2章）。
- *
- * 実際のFirestore同期（shelf_items / clipboard_historyのpush/pull・onSnapshotによる
- * リアルタイムリスナー）は本ファイルのスコープに含めない（次フェーズで着手）。
- * ここでは「ユーザーが設定画面に入力したFirebase構成・Email/Passwordで実際にサインインできるか」の
- * 疎通確認（`testFirebaseConnection`）のみを提供する。
+ * F-22（デバイス間同期）: Bring Your Own Firebase方式の常駐セッション管理・疎通確認ロジック
+ * （architecture.md 10.2章）。
  *
  * 同期ロジックはOS非依存のため、Rust側（src-tauri/）ではなくフロントエンドに置く方針
  * （architecture.md 10.2章「実装配置」）。Firebase Web SDKはTauriのWebViewから直接利用する。
+ *
+ * 実際のFirestore push/pull（onSnapshotによるリアルタイムリスナー含む）は
+ * `src/lib/sync/clipboardSync.ts`に置く。本ファイルはFirebaseAppの初期化・
+ * サインイン疎通確認のみを担う。
  */
-import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword, type AuthError } from "firebase/auth";
 import type { FirebaseConfig } from "../types/settings";
 
 /**
- * Firebase Appを初期化する。呼び出しのたびに新しいFirebaseAppインスタンスを作る
- * （`initializeApp`はデフォルト名では多重初期化するとエラーになるため、疎通確認等の
- * 一時利用ではユニークな名前を付けて都度破棄する運用にしている。後続フェーズで常駐の
- * 同期セッションを持つ場合は、この関数とは別に「アプリ全体で1つだけ持つFirebaseApp」を
- * 管理する仕組みが必要になる想定。今回のスコープでは疎通確認用途のみ）。
+ * 同期エンジンが使い続ける常駐FirebaseAppの固定名。
+ *
+ * 以前は疎通確認のたびにユニーク名の一時的なFirebaseAppを作って確認後に`deleteApp`する実装
+ * だったが、実際の同期エンジンは常駐して`onSnapshot`を張り続ける必要があり、アプリ再起動の
+ * たびにパスワード入力を求めるのは非現実的（パスワードは書き込み専用コマンドで保存するのみで
+ * `get_settings`からは読み出せない設計にしているため、そもそも再入力なしでは再サインイン
+ * できない）。そこでFirebase Auth SDKの既定の永続化（`browserLocalPersistence`。TauriのWebView
+ * はブラウザ相当のlocalStorage/IndexedDBを持つため、サインイン状態はアプリ再起動後も保持される）
+ * を利用し、「接続テスト」に成功した時点のサインインをそのまま同期エンジンが使う常駐セッション
+ * とする方式に変更した（architecture.md 10.2章「認証セッションの持ち方」）。
+ */
+const SYNC_APP_NAME = "ledge-sync";
+
+/**
+ * 固定名の常駐FirebaseAppを取得する。既に初期化済みならそれをそのまま返し（多重初期化は
+ * エラーになるため）、無ければ新規初期化する。`deleteApp`は呼ばない。
  */
 export function initFirebase(config: FirebaseConfig): FirebaseApp {
-  const uniqueName = `ledge-sync-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return initializeApp(config, uniqueName);
+  const existing = getApps().find((app) => app.name === SYNC_APP_NAME);
+  if (existing) {
+    return existing;
+  }
+  return initializeApp(config, SYNC_APP_NAME);
 }
 
 /** `testFirebaseConnection`の結果。 */
@@ -31,9 +45,12 @@ export type FirebaseConnectionResult =
   | { ok: false; errorCode: string; message: string };
 
 /**
- * 指定のFirebase構成でAppを初期化し、Email/PasswordでのサインインをtestFirebaseConnectionという
- * 名の通り「疎通確認」のためだけに1回試みる。設定画面の「接続テスト」ボタンから呼ばれる想定。
- * 成功/失敗いずれの場合も、確認用に作った一時的なFirebaseAppは後始末として破棄する。
+ * 指定のFirebase構成でAppを初期化（または既存の常駐Appを再利用）し、Email/Passwordでの
+ * サインインを試みる。設定画面の「接続テスト」ボタンから呼ばれる想定。
+ *
+ * ここでのサインインは疎通確認だけでなく、成功時点のセッションがそのまま同期エンジンの
+ * 常駐セッションになる（`browserLocalPersistence`により永続化される）。そのため、以前の
+ * 実装と異なりAppを都度破棄することはしない。
  */
 export async function testFirebaseConnection(
   config: FirebaseConfig,
@@ -52,10 +69,5 @@ export async function testFirebaseConnection(
       errorCode: authError.code ?? "unknown",
       message: authError.message ?? "接続テストに失敗しました",
     };
-  } finally {
-    // 疎通確認専用の一時Appなので、結果に関わらず破棄してリソースを残さない
-    await deleteApp(app).catch(() => {
-      // 破棄失敗は疎通確認結果に影響しないため無視する
-    });
   }
 }

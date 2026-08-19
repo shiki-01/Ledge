@@ -67,7 +67,7 @@ pub fn list_history(
     let mut stmt = conn
         .prepare(
             "SELECT DISTINCT ch.id, ch.content_type, ch.text_content, ch.image_path, ch.thumbnail_path, \
-                    ch.file_paths_json, ch.pinned, ch.created_at, ch.updated_at \
+                    ch.file_paths_json, ch.pinned, ch.created_at, ch.updated_at, ch.content_hash \
              FROM clipboard_history ch \
              LEFT JOIN clipboard_tags ct ON ct.clipboard_id = ch.id \
              LEFT JOIN tags t ON t.id = ct.tag_id \
@@ -90,6 +90,7 @@ pub fn list_history(
                 pinned: row.get(6)?,
                 created_at: row.get(7)?,
                 updated_at: row.get(8)?,
+                content_hash: row.get(9)?,
             })
         })
         .map_err(db_err)?;
@@ -106,7 +107,7 @@ pub fn get_entry(conn: &Connection, id: i64) -> Result<ClipboardEntry, ShelfErro
     let row = conn
         .query_row(
             "SELECT id, content_type, text_content, image_path, thumbnail_path, file_paths_json, \
-                    pinned, created_at, updated_at \
+                    pinned, created_at, updated_at, content_hash \
              FROM clipboard_history WHERE id = ?1",
             params![id],
             |row| {
@@ -120,6 +121,7 @@ pub fn get_entry(conn: &Connection, id: i64) -> Result<ClipboardEntry, ShelfErro
                     pinned: row.get(6)?,
                     created_at: row.get(7)?,
                     updated_at: row.get(8)?,
+                    content_hash: row.get(9)?,
                 })
             },
         )
@@ -303,6 +305,70 @@ pub fn set_pinned(conn: &Connection, id: i64, pinned: bool) -> Result<(), ShelfE
     Ok(())
 }
 
+/// F-22（デバイス間同期）: クラウド（Firestore）側の変更をローカルへ反映する（pull）。
+///
+/// `content_hash`一致の既存行があれば`updated_at`を比較し、クラウド側が新しい場合のみ
+/// `text_content` / `pinned = 1` / `updated_at`を更新する（Last-Write-Wins、architecture.md
+/// 10.2章）。`updated_at`はRust側の`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`と同じISO 8601
+/// （ミリ秒3桁・UTC）形式である前提で、SQLite上は単純な文字列比較で新旧を判定できる。
+/// 既存行が無ければ`content_type = 'text'`のピン留め済み新規行として挿入する。
+///
+/// 常にpinned扱いで挿入し、タイムスタンプをクラウド側の値で上書きする点が`record_entry`とは
+/// 異なるため、`record_entry`は流用せず専用関数として実装している（呼び出し元指示のとおり）。
+pub fn sync_upsert_from_cloud(
+    conn: &Connection,
+    content_hash: &str,
+    text_content: &str,
+    updated_at: &str,
+) -> Result<(), ShelfError> {
+    let existing: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT id, updated_at FROM clipboard_history WHERE content_hash = ?1",
+            params![content_hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(db_err)?;
+
+    match existing {
+        Some((id, local_updated_at)) => {
+            // クラウド側が新しい場合のみ上書きする（Last-Write-Wins）。同値・ローカルの方が新しい
+            // 場合は何もしない（ローカルの方が新しいのにクラウドの古い値で巻き戻さないため）。
+            if updated_at > local_updated_at.as_str() {
+                conn.execute(
+                    "UPDATE clipboard_history SET text_content = ?1, pinned = 1, updated_at = ?2 WHERE id = ?3",
+                    params![text_content, updated_at, id],
+                )
+                .map_err(db_err)?;
+            }
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO clipboard_history \
+                    (content_type, text_content, pinned, content_hash, created_at, updated_at) \
+                 VALUES ('text', ?1, 1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?3)",
+                params![text_content, content_hash, updated_at],
+            )
+            .map_err(db_err)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// F-22（デバイス間同期）: クラウド側でドキュメントが削除されたことをローカルへ反映する（pull）。
+///
+/// 該当行があれば`pinned = 0`に更新するのみで、行自体は削除しない（安全側の設計判断、
+/// architecture.md 10.2章）。該当行が無ければ何もしない（エラーにしない）。
+pub fn sync_unpin_by_hash(conn: &Connection, content_hash: &str) -> Result<(), ShelfError> {
+    conn.execute(
+        "UPDATE clipboard_history SET pinned = 0 WHERE content_hash = ?1",
+        params![content_hash],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 /// 個別削除。画像キャッシュファイルも同時に削除する。
 pub fn delete_entry(conn: &Connection, id: i64) -> Result<(), ShelfError> {
     let targets = collect_targets(conn, "SELECT id, image_path FROM clipboard_history WHERE id = ?1", params![id])?;
@@ -398,6 +464,7 @@ struct RawRow {
     pinned: i64,
     created_at: String,
     updated_at: String,
+    content_hash: String,
 }
 
 impl RawRow {
@@ -418,6 +485,7 @@ impl RawRow {
             pinned: self.pinned != 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            content_hash: self.content_hash,
             tags: Vec::new(),
         })
     }
@@ -644,6 +712,95 @@ mod tests {
 
         let all = list_history(&conn, None, None).unwrap();
         assert_eq!(all.len(), 3, "元の2件は削除されず、結合結果が新規1件として追加されるはず");
+    }
+
+    #[test]
+    fn sync_upsert_from_cloud_inserts_new_pinned_text_entry() {
+        let (db, _cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        sync_upsert_from_cloud(&conn, "hash-1", "from cloud", "2026-08-19T00:00:00.000Z").unwrap();
+
+        let entries = list_history(&conn, None, None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text_content.as_deref(), Some("from cloud"));
+        assert!(entries[0].pinned, "クラウドからの新規行は常にピン留め済みで挿入されるはず");
+        assert_eq!(entries[0].content_hash, "hash-1");
+    }
+
+    #[test]
+    fn sync_upsert_from_cloud_overwrites_when_cloud_is_newer() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        let snapshot = ClipboardSnapshot::Text("local version".into());
+        let hash = content_hash(&snapshot);
+        record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
+        let id = list_history(&conn, None, None).unwrap()[0].id;
+        // ローカルの更新日時を過去に固定しておき、クラウド側が新しいことを確定させる
+        conn.execute(
+            "UPDATE clipboard_history SET updated_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+
+        sync_upsert_from_cloud(&conn, &hash, "cloud version", "2026-08-19T00:00:00.000Z").unwrap();
+
+        let entries = list_history(&conn, None, None).unwrap();
+        assert_eq!(entries.len(), 1, "同一content_hashなので新規行にはならないはず");
+        assert_eq!(entries[0].text_content.as_deref(), Some("cloud version"));
+        assert!(entries[0].pinned);
+        assert_eq!(entries[0].updated_at, "2026-08-19T00:00:00.000Z");
+    }
+
+    #[test]
+    fn sync_upsert_from_cloud_ignores_older_cloud_update() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        let snapshot = ClipboardSnapshot::Text("newer local".into());
+        let hash = content_hash(&snapshot);
+        record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
+        let id = list_history(&conn, None, None).unwrap()[0].id;
+        conn.execute(
+            "UPDATE clipboard_history SET updated_at = '2026-08-19T00:00:00.000Z' WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+
+        // クラウド側の方が古いタイムスタンプを持つ更新は無視されるはず（Last-Write-Wins）
+        sync_upsert_from_cloud(&conn, &hash, "stale cloud version", "2020-01-01T00:00:00.000Z").unwrap();
+
+        let entries = list_history(&conn, None, None).unwrap();
+        assert_eq!(entries[0].text_content.as_deref(), Some("newer local"));
+        assert_eq!(entries[0].updated_at, "2026-08-19T00:00:00.000Z");
+    }
+
+    #[test]
+    fn sync_unpin_by_hash_unpins_without_deleting_row() {
+        let (db, cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        let snapshot = ClipboardSnapshot::Text("keep me".into());
+        let hash = content_hash(&snapshot);
+        record_entry(&conn, &cache.0, &snapshot, &hash).unwrap();
+        let id = list_history(&conn, None, None).unwrap()[0].id;
+        set_pinned(&conn, id, true).unwrap();
+
+        sync_unpin_by_hash(&conn, &hash).unwrap();
+
+        let entries = list_history(&conn, None, None).unwrap();
+        assert_eq!(entries.len(), 1, "行自体は削除されず残っているはず（安全側の設計判断）");
+        assert!(!entries[0].pinned, "ピン留めは解除されるはず");
+    }
+
+    #[test]
+    fn sync_unpin_by_hash_is_noop_when_hash_not_found() {
+        let (db, _cache) = setup();
+        let conn = db.0.lock().unwrap();
+
+        // 該当行が無くてもエラーにならないはず
+        sync_unpin_by_hash(&conn, "no-such-hash").unwrap();
     }
 
     #[test]

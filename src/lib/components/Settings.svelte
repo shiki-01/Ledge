@@ -12,7 +12,8 @@
   import { updateSettings, syncSetFirebasePassword } from "../api/commands";
   import { isShelfErrorPayload } from "../types/error";
   import { testFirebaseConnection } from "../sync/firebase";
-  import type { AppSettingsPatch, ShelfEdge } from "../types/settings";
+  import { startClipboardSync } from "../sync/clipboardSync";
+  import type { AppSettingsPatch, FirebaseConfig, ShelfEdge } from "../types/settings";
 
   let errorMessage = $state<string | null>(null);
   let errorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -156,19 +157,25 @@
     }
     testingConnection = true;
     try {
-      const result = await testFirebaseConnection(
-        {
-          apiKey: firebaseApiKeyDraft,
-          authDomain: firebaseAuthDomainDraft,
-          projectId: firebaseProjectIdDraft,
-          appId: firebaseAppIdDraft,
-        },
-        firebaseEmailDraft,
-        firebasePasswordDraft,
-      );
+      const config: FirebaseConfig = {
+        apiKey: firebaseApiKeyDraft,
+        authDomain: firebaseAuthDomainDraft,
+        projectId: firebaseProjectIdDraft,
+        appId: firebaseAppIdDraft,
+      };
+      const result = await testFirebaseConnection(config, firebaseEmailDraft, firebasePasswordDraft);
       testResult = result.ok
         ? { ok: true, message: "接続に成功しました" }
         : { ok: false, message: `接続に失敗しました（${result.errorCode}）: ${result.message}` };
+
+      // 接続テスト成功時点のサインインをそのまま同期エンジンの常駐セッションにする
+      // （architecture.md 10.2章「認証セッションの持ち方」）。同期エンジンの開始自体は
+      // App.svelte側でも`syncEnabled`と構成の揃い具合を見て起動するが、既に`syncEnabled`が
+      // ONの状態で構成だけ直していた場合、設定変更を経ずにこの場で即座にサインイン後の
+      // セッションを使い始められるようここでも起動しておく（迷った設計判断: 呼び出し元へ報告）。
+      if (result.ok && $settingsStore?.syncEnabled) {
+        void startClipboardSync(config);
+      }
     } finally {
       testingConnection = false;
     }
