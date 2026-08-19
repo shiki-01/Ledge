@@ -11,32 +11,12 @@ Shelf Drop（仮称）: Windows / macOS 両対応のファイル一時置き場�
 - **フロントエンド**: Svelte 5 + TypeScript
 - **バックエンド**: Rust（Tauri v2）
 - **データ永続化**: SQLite（rusqlite）
-- **クリップボード抽象化**: arboard または clipboard-rs
+- **クリップボード抽象化**: arboard または clipboard-rs（Phase2で選定・実装）
 - **グローバルホットキー**: tauri-plugin-global-shortcut
-- **Windows D&D**: windows-rs（COM / IDropTarget）
-- **macOS D&D**: NSPasteboard / NSDraggingSession（Tauri経由）
+- **Windows/macOS アウトバウンドD&D**: `drag`クレート（tauri-plugin-dragが内部で使うものと同一。Windows=COM/IDropTarget、macOS=NSPasteboard/NSDraggingSessionを内部で利用）。採用理由は`docs/architecture.md` 4.2章参照
+- **設定永続化**: tauri-plugin-store（`settings.json`）
 
-## ディレクトリ構成（想定）
-
-```
-shelf-drop/
-├── src/                    # Svelteフロントエンド
-│   ├── lib/
-│   │   ├── components/     # Shelf.svelte, ClipboardHistory.svelte, Settings.svelte 等
-│   │   ├── stores/         # シェルフ状態・クリップボード履歴のストア
-│   │   └── types/          # 型定義（Rust側とインターフェースを合わせる）
-│   └── routes/ or App.svelte
-├── src-tauri/              # Rustバックエンド
-│   ├── src/
-│   │   ├── clipboard/      # クリップボード監視（OS分岐）
-│   │   ├── drag_drop/      # ドラッグ&ドロップ処理（OS分岐）
-│   │   ├── storage/        # SQLiteアクセス層
-│   │   ├── shortcut/       # グローバルホットキー
-│   │   └── main.rs
-│   └── tauri.conf.json
-├── requirements.md
-└── CLAUDE.md
-```
+実際のディレクトリ構成・SQLiteスキーマ・Tauriコマンド一覧・OS抽象化traitの詳細設計は [docs/architecture.md](docs/architecture.md) を参照（実装済みコードのSSoTはコードそのものだが、設計意図はこちらに集約する）。
 
 ## 実装フェーズ（requirements.md 7章に対応）
 
