@@ -26,7 +26,13 @@
         "dragDropEnabled": true
       }
     ],
-    "withGlobalTauri": false
+    "withGlobalTauri": false,
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/clipboard-cache/*"]
+      }
+    }
   },
   "bundle": {
     "active": true,

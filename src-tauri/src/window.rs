@@ -46,13 +46,26 @@ fn show(app: &AppHandle, window: &WebviewWindow) {
     if let Err(e) = window.set_focus() {
         warn!(error = %e, "シェルフウィンドウへのフォーカス設定に失敗しました");
     }
+    notify_clipboard_panel_visibility(true);
 }
 
 fn hide(window: &WebviewWindow) {
     if let Err(e) = window.hide() {
         error!(error = %e, "シェルフウィンドウの非表示に失敗しました");
     }
+    notify_clipboard_panel_visibility(false);
 }
+
+/// メインウィンドウ（Phase2ではシェルフ/クリップボード履歴を1ウィンドウ内タブで切り替える）の
+/// 表示状態をmacOSのクリップボード監視ポーリング間隔調整へ伝える（architecture.md 4.1章）。
+/// Windows/Linux開発環境ではポーリング間隔の概念自体が無いため何もしない。
+#[cfg(target_os = "macos")]
+fn notify_clipboard_panel_visibility(visible: bool) {
+    crate::clipboard::macos::set_panel_visible(visible);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notify_clipboard_panel_visibility(_visible: bool) {}
 
 /// 設定に基づいてシェルフウィンドウを画面端へ配置する。
 ///

@@ -31,6 +31,23 @@ pub struct AppSettings {
     pub shelf_hotkey: String,
     /// シェルフを表示する画面端。
     pub shelf_edge: ShelfEdge,
+    /// クリップボード履歴の自動クリア（F-16）: 件数上限。既定500件（requirements.md 10.2章）。
+    /// 設定画面UI自体はPhase3のため、Phase2では初期値のみ持たせる。
+    /// `#[serde(default)]`により、Phase1時点の`settings.json`（このフィールドを持たない）を
+    /// 読み込んでも既存のホットキー等を失わずに済むようにしている。
+    #[serde(default = "default_clipboard_max_entries")]
+    pub clipboard_max_entries: u32,
+    /// クリップボード履歴の自動クリア（F-16）: 経過日数上限。既定30日（requirements.md 10.2章）。
+    #[serde(default = "default_clipboard_retention_days")]
+    pub clipboard_retention_days: u32,
+}
+
+fn default_clipboard_max_entries() -> u32 {
+    500
+}
+
+fn default_clipboard_retention_days() -> u32 {
+    30
 }
 
 impl Default for AppSettings {
@@ -38,6 +55,8 @@ impl Default for AppSettings {
         Self {
             shelf_hotkey: default_shelf_hotkey(),
             shelf_edge: ShelfEdge::Right,
+            clipboard_max_entries: default_clipboard_max_entries(),
+            clipboard_retention_days: default_clipboard_retention_days(),
         }
     }
 }
@@ -59,6 +78,8 @@ fn default_shelf_hotkey() -> String {
 pub struct AppSettingsPatch {
     pub shelf_hotkey: Option<String>,
     pub shelf_edge: Option<ShelfEdge>,
+    pub clipboard_max_entries: Option<u32>,
+    pub clipboard_retention_days: Option<u32>,
 }
 
 /// `settings.json`から設定を読み込む。未初期化、または内容が壊れている場合は
@@ -96,6 +117,12 @@ pub fn update_settings(app: &AppHandle, patch: AppSettingsPatch) -> Result<AppSe
     }
     if let Some(edge) = patch.shelf_edge {
         settings.shelf_edge = edge;
+    }
+    if let Some(max_entries) = patch.clipboard_max_entries {
+        settings.clipboard_max_entries = max_entries;
+    }
+    if let Some(retention_days) = patch.clipboard_retention_days {
+        settings.clipboard_retention_days = retention_days;
     }
 
     save_settings(app, &settings)?;

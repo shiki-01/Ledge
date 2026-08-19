@@ -4,6 +4,7 @@
 //! SQLiteへのアクセスはこのモジュール配下に閉じ込め、他モジュールからは
 //! `shelf_repo`等のリポジトリ関数越しにのみ触る。
 
+pub mod clipboard_repo;
 pub mod db;
 pub mod models;
 pub mod shelf_repo;

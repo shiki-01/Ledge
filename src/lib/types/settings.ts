@@ -11,6 +11,10 @@ export type ShelfEdge = "top" | "bottom" | "left" | "right";
 export interface AppSettings {
   shelfHotkey: string;
   shelfEdge: ShelfEdge;
+  /** クリップボード履歴の自動クリア（F-16）: 件数上限。既定500件。設定画面UI自体はPhase3。 */
+  clipboardMaxEntries: number;
+  /** クリップボード履歴の自動クリア（F-16）: 経過日数上限。既定30日。設定画面UI自体はPhase3。 */
+  clipboardRetentionDays: number;
 }
 
 /** `update_settings`コマンドへ渡す部分更新オブジェクト。 */

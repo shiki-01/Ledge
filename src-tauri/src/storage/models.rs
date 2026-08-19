@@ -44,3 +44,49 @@ pub struct ShelfItem {
     pub added_at: String,
     pub missing: bool,
 }
+
+/// クリップボード履歴アイテムの内容種別（Phase2, F-11）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardContentType {
+    Text,
+    Image,
+    FilePaths,
+}
+
+impl ClipboardContentType {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            ClipboardContentType::Text => "text",
+            ClipboardContentType::Image => "image",
+            ClipboardContentType::FilePaths => "file_paths",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "image" => ClipboardContentType::Image,
+            "file_paths" => ClipboardContentType::FilePaths,
+            _ => ClipboardContentType::Text,
+        }
+    }
+}
+
+/// クリップボード履歴の1件（`clipboard_history`テーブルに対応、Phase2）。
+///
+/// `content_hash`は重複排除専用の内部キーであり、フロントエンドに公開する必要が無いため
+/// この構造体には含めない（architecture.md 2章のDDLにはカラムとして存在する）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardEntry {
+    pub id: i64,
+    pub content_type: ClipboardContentType,
+    pub text_content: Option<String>,
+    pub image_path: Option<String>,
+    pub thumbnail_path: Option<String>,
+    /// `content_type == FilePaths`の場合のみ値を持つ（DB上は`file_paths_json`にJSON配列で保存）。
+    pub file_paths: Option<Vec<String>>,
+    pub pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}

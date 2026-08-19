@@ -115,15 +115,13 @@
 
 <style>
   .shelf {
+    /* 背景・枠線はApp.svelteの`.app`コンテナ側で描画する（Phase2: シェルフ/履歴タブの共通chrome） */
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
     box-sizing: border-box;
     padding: 0.6rem;
     gap: 0.5rem;
-    background: rgba(20, 20, 24, 0.72);
-    backdrop-filter: blur(6px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
     transition: background-color 0.15s ease;
   }
 
