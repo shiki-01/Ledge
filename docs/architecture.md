@@ -381,3 +381,46 @@ service cloud.firestore {
 ## 11. フェーズと本ドキュメントの対応
 
 CLAUDE.mdのフェーズ一覧・機能IDとの対応は`requirements.md` 7章の通り。本ドキュメントの各セクションはPhase1〜4を横断して先取りした設計になっているが、実装はフェーズ順に行い、未着手フェーズのテーブル/コマンドはマイグレーション・コード上に用意しても機能としては呼び出さない（UIから到達不可にする）。
+
+---
+
+## 12. Phase6 追加設計（F-09, F-21）
+
+`requirements.md` 7章のフェーズ計画表にはPhase1〜5までしか割り当てが無いが、P2機能として残っていたF-09（よく使うフォルダ登録）とF-21（右クリックメニュー）をPhase6として追加実装する。いずれもOS分岐が不要かクロスプラットフォーム対応済みのTauri公式プラグインで完結するため、Phase5のF-08(Mac)/F-22のような「実機必須で未検証」という制約を持たない。
+
+### 12.1 F-09（よく使うフォルダ登録）
+
+`shelf_items`はドラッグ&ドロップの都度追加され「全て削除」で消える一時置き場（requirements.md 10.1章）だが、F-09は「常時表示するショートカット」という別のライフサイクルを持つため、`shelf_items`を流用せず新規テーブル`favorite_folders`を設ける。
+
+```sql
+-- よく使うフォルダ（Phase6, F-09）
+CREATE TABLE favorite_folders (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_path   TEXT NOT NULL UNIQUE,  -- 同一フォルダの重複登録を防ぐ（shelf_itemsと異なり「ブックマーク」なので重複を許さない）
+    display_name  TEXT NOT NULL,
+    sort_order    INTEGER NOT NULL,
+    added_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+```
+
+マイグレーションは`0002_favorite_folders.sql`として追加し、`db.rs`の`run_migrations`を`user_version`1→2に対応させる。
+
+- フォルダ選択には`tauri-plugin-dialog`（公式・クロスプラットフォーム）の`open({ directory: true })`を使う。新規依存として`Cargo.toml`（target cfgなし、全OS共通）と`package.json`に追加する
+- `missing`判定・表示は`shelf_items`と同じ方式（一覧取得のたびに`Path::exists()`で算出、DBには保存しない）
+- UIはシェルフタブ内、通常のシェルフ一覧とは別セクション（`FavoriteFolders.svelte`）として常時表示する。「全て削除」の対象には含めない（別テーブルなので自然と対象外になる）
+- ショートカットからのドラッグアウトは既存の`drag_drop::DragOutSource`をそのまま再利用する（`favorites_begin_drag_out`コマンドで単一パスを渡す）
+- コマンド: `favorites_list` / `favorites_add(path)` / `favorites_remove(id)` / `favorites_begin_drag_out(id)`。イベント名は`favorites://changed`
+
+### 12.2 F-21（右クリックメニュー）
+
+要件（requirements.md）の文言は「共有/圧縮/パスコピー等」であり、「等」が示す通り例示であって全項目必須ではないと解釈する。このうち「共有」はWindows（`DataTransferManager`、COM）・macOS（`NSSharingServicePicker`、Objective-C）双方とも本格的なOSネイティブ実装が必要で、F-08と同様この開発コンテナ（Linux）では型検査すら通せず未検証のまま組み込むことになり、複雑さに対して得られる価値が小さいと判断した（迷った設計判断: 呼び出し元へ報告）。そこで「共有」は、OS標準のファイルマネージャーで表示する（Explorerで表示 / Finderで表示）に置き換える。これはExplorer/Finder上で右クリックすればOSネイティブの共有メニューへ辿り着けるための現実的な代替であり、`tauri-plugin-opener`（公式、Windows/macOS/Linux対応済み）の`revealItemInDir`で実現できるため、自前のOS分岐コードが不要になる。
+
+右クリックメニューの実装は、ネイティブメニューAPI（`@tauri-apps/api/menu`）ではなく既存の`ShelfItem.svelte`のプレビューポップオーバー（`oncontextmenu`でCSS/HTML製ポップアップを表示）と同じ方式を踏襲する。常時最前面・装飾無しの300px幅ウィンドウというこのアプリ特有のウィンドウ形状に対して、ネイティブメニューの表示位置調整より確実に動作するための判断。
+
+メニュー項目は以下の3つ（対象は`shelf_items`のみ。`favorite_folders`は対象外＝要件通りシェルフ内アイテムに限定）:
+
+| 項目 | 実装 |
+|---|---|
+| パスをコピー | 新規コマンド`shelf_copy_path(id)`。`arboard`で`source_path`をクリップボードへ書き込む。クリップボード監視の自己ループガード（`clipboard_guard`）はかけない。通常の外部コピーと同様にクリップボード履歴（F-11）へ自然に記録されてよい、という判断 |
+| 圧縮してシェルフに追加 | 新規コマンド`shelf_compress_item(id)`。対象ファイル/フォルダをZIP圧縮し、`shelf_repo::add_paths`経由で新規シェルフアイテムとして追加する。圧縮先は元ファイルと同じディレクトリではなくOS一時ディレクトリ（`std::env::temp_dir()`）にする（読み取り専用ディレクトリ等への書き込み権限エラーを避けるため）。フォルダの再帰走査は依存を増やさず`std::fs::read_dir`の手動再帰で行う。圧縮ライブラリは新規依存`zip`クレート（OS分岐不要、この開発コンテナでもコンパイル・テスト可能） |
+| エクスプローラー/Finderで表示 | Rustコマンドは追加せず、フロントから`tauri-plugin-opener`の`revealItemInDir(sourcePath)`を直接呼ぶ |
