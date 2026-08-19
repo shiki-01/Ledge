@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "シェルフウィンドウ（メインウィンドウ）に対する既定のパーミッション。Phase1ではフロントエンドから直接プラグインのIPCコマンドを呼び出す箇所が無く（グローバルショートカット・設定ストアはいずれもRust側のみで完結する）、自前のTauriコマンドはcoreの既定権限があれば呼び出せるため、core:defaultのみを許可する。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
