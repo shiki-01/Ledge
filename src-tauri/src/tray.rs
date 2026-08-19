@@ -35,7 +35,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), ShelfError> {
         .menu(&menu)
         // 左クリックでのメニュー表示は行わず、独自にシェルフのトグル動作を割り当てる
         .show_menu_on_left_click(false)
-        .tooltip("Shelf Drop")
+        .tooltip("Ledge")
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_ID_SHOW_SHELF => window::show_shelf(app),
             MENU_ID_SETTINGS => window::show_settings(app),

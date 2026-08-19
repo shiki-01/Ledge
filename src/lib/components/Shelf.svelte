@@ -99,7 +99,7 @@
 
 <div class="shelf" class:shelf--dragging={isDraggingOver}>
   <header class="shelf__header">
-    <span class="shelf__title">Shelf Drop</span>
+    <span class="shelf__title">Ledge</span>
     <button
       type="button"
       class="shelf__clear"

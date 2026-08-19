@@ -448,7 +448,7 @@ mod tests {
         impl TempCacheDir {
             pub fn new() -> Self {
                 let dir = std::env::temp_dir().join(format!(
-                    "shelf-drop-test-{}-{}",
+                    "ledge-test-{}-{}",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)

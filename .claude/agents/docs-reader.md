@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, mcp__local-rag__search_codebase
 model: haiku
 ---
 
-Shelf Drop（仮称。Windows / macOS両対応のファイル一時置き場＋クリップボード履歴管理アプリ）の
+Ledge（Windows / macOS両対応のファイル一時置き場＋クリップボード履歴管理アプリ）の
 要件定義書（`docs/requirements.md`）の下読み専門エージェント。
 **読んで要約するだけ**。文書もコードも編集しない。設計の良し悪しも判断しない。
 

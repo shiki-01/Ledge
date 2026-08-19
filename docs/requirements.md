@@ -2,8 +2,8 @@
 
 ## 1. 概要
 
-### 1.1 プロジェクト名（仮）
-Shelf Drop（仮称）
+### 1.1 プロジェクト名
+Ledge
 
 ### 1.2 背景
 Windows向けクリップボードマネージャー「Edge Drop」（edgedrop.app）、およびMac向けシェルフアプリ「Yoink」「Dockside」を参考に、両OSに対応した無料・オープンソースのファイル/クリップボード一時置き場アプリを自作する。既存アプリは各OS単体対応かつ有料のものが多く、無料でWindows/Mac両対応の選択肢が乏しいことが動機。
@@ -184,12 +184,12 @@ Windows向けクリップボードマネージャー「Edge Drop」（edgedrop.a
 
 | # | 事項 | 現状の暫定方針 | 判断待ちの理由 |
 |---|---|---|---|
-| D-1 | 正式なアプリ名・アイコン | コード内では`shelf-drop`のまま暫定使用 | ブランディングはユーザー本人の意向次第 |
-| D-2 | Bundle ID / Application ID | `dev.shiki.shelfdrop` を仮置き | 実際に公開する場合は所有ドメイン・GitHub組織等に合わせるべき |
-| D-3 | OSSライセンス | MIT を暫定採用（`LICENSE`ファイル追加） | GPL系等ユーザーの意向があれば変更 |
-| D-4 | コード署名（Windows Authenticode / Apple Developer ID + notarization） | 未設定（署名なしの開発ビルドのまま） | 証明書・Apple Developer Programアカウント等、ユーザー本人の契約・鍵が必要なため実装だけでは進められない |
+| D-1 | 正式なアプリ名・アイコン | **決定済み**。アプリ名は「Ledge」。アイコンはユーザー本人が別途用意するまでの仮アイコンを`src-tauri/icons/`に配置済み | ― |
+| D-2 | Bundle ID / Application ID | **決定済み**。`com.shiki-01.ledge` | ― |
+| D-3 | OSSライセンス | **決定済み**。MIT（`LICENSE`ファイル済み） | ― |
+| D-4 | コード署名（Windows Authenticode / Apple Developer ID + notarization） | **保留**（署名なしの開発ビルドのまま） | 証明書・Apple Developer Programアカウント等、ユーザー本人の契約・鍵が必要なため実装だけでは進められない |
 | D-5 | 既定のグローバルホットキー | シェルフ: `Ctrl+Alt+S` / `Cmd+Option+S`、履歴: `Ctrl+Alt+V` / `Cmd+Option+V` を仮置き | 他アプリとの競合はユーザーの利用環境依存。F-20で変更可能な設計とする |
-| D-6 | OSS公開のタイミング・公開範囲 | 未着手（個人開発として進行） | 公開判断はユーザー本人 |
-| D-7 | F-22（デバイス間同期）の方式 | 設計未着手（Phase5・Out of scope寄り） | 自前サーバー/クラウドサービス利用等、方式検討自体がユーザー判断を要する |
+| D-6 | OSS公開のタイミング・公開範囲 | **決定済み**。当面は個人開発として進行し、公開タイミングは改めて判断する | ― |
+| D-7 | F-22（デバイス間同期）の方式 | **決定済み**。各ユーザーが自分のFirebaseプロジェクト（Sparkプラン=無料枠）を用意し、アプリ設定にFirebase構成とログイン情報を入力するBring Your Own方式を採用。開発者側の運営コストはゼロ、ユーザー側も無料枠内で完結する。詳細設計は`architecture.md` 10.2章 | ― |
 
 上記以外の実装判断（データモデル、UI細部、デフォルト値等）は本ドキュメントおよび`architecture.md`の記載をもって開発者（Claude）の裁量で決定済みとする。

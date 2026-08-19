@@ -297,16 +297,65 @@ Phase2で`clipboard_list_history(query)`は既にLIKE検索を受け付けてい
 - **初回起動時のUX**: 権限が無い状態では`NSEvent`のグローバルモニタはイベントを一切受け取れない（エラーにはならず単に発火しない）ため、初回起動時に権限が付与されているかを`AXIsProcessTrusted()`で確認し、無ければ設定画面へ誘導するアラートを表示する設計とする（Windows版には無い、macOS固有の追加UI）
 - **未検証である旨**: 本リポジトリの開発コンテナはLinuxのためこのコードはコンパイル対象外であり、実機（macOS）での動作確認ができていない。Windows版と同様、静的レビューのみで実装する
 
-### 10.2 F-22（デバイス間同期）— 実装しない
+### 10.2 F-22（デバイス間同期）— Bring Your Own Firebase方式
 
-`requirements.md` D-7に記載の通り、同期方式（自前サーバー/クラウドサービス利用/E2E暗号化の要否等）はユーザー本人の判断を要する事項であり、方式が定まらない状態でコードを書き始めると手戻りが大きい（データモデル・認証方式・競合解決方針など、後からの変更コストが高い意思決定を含むため）。そのため**Phase5では実装を行わない**。判断待ちのまま進めてよい範囲（F-08 Mac）のみ着手する。
+`requirements.md` D-7の通り、同期方式は決定済み。開発者（shiki）側がサーバー費用を負担せず、かつユーザー側も無料で運用できることを最優先条件とし、**各ユーザーが自分自身のFirebaseプロジェクト（Sparkプラン＝無料枠）を用意し、その接続情報をLedgeの設定画面に入力する「Bring Your Own Firebase」方式**を採用する。同期は完全にオプトインとし、未設定の場合は従来どおりローカルSQLiteのみで完結する（この場合Phase1〜4の挙動に一切影響しない）。
 
-同期方式の選択肢だけ判断材料として記しておく（決定はしない）:
-1. 自前の軽量同期サーバー（例: 個人のVPS + 認証付きREST/WebSocket）を建てて複数端末のSQLiteを同期
-2. 既存クラウドストレージ（iCloud Drive / Dropbox等）のフォルダにSQLiteファイルまたはエクスポートJSONを置き、ファイル監視で反映
-3. 同期そのものをスコープアウトし、エクスポート/インポート機能（手動）に留める
+#### 前提としてユーザーが行うセットアップ（アプリ外の作業）
 
-いずれも認証・競合解決・暗号化方針の検討が必要であり、`requirements.md` 9章が示す通りOut of Scope寄りの整理を維持する。
+1. [Firebase Console](https://console.firebase.google.com/)で新規プロジェクトを作成する（Sparkプラン＝無料）
+2. Firestore Database を有効化する（本番モードで開始し、後述のセキュリティルールを設定）
+3. Authentication を有効化し、Email/Password プロバイダをONにする
+4. Authentication上で同期用のアカウントを1つ作成する（同一アカウントを同期させたい全端末で使い回す）
+5. プロジェクト設定からWebアプリの構成情報（`apiKey` / `authDomain` / `projectId` / `appId`）を取得する
+
+このセットアップ手順は、実装が完了した段階でアプリ内ヘルプまたは`docs/`配下に別途手順書として用意する（本設計では対象外）。
+
+#### なぜEmail/Password認証か
+
+Firestoreのセキュリティルールで「本人のデータにしかアクセスできない」を強制するには、端末をまたいで同一の`uid`が得られる認証が必要。匿名認証（Anonymous Auth）は端末ごとに異なる`uid`が発行されるため同期の用をなさない。カスタムトークン方式はトークン発行用のサーバーが必要になり「サーバー費用ゼロ」の前提と矛盾する。Email/Password認証はサーバーレスで実現でき、かつユーザーが管理画面上で直接アカウントを作れるため、この制約下で最も単純な選択肢として採用する（将来的にGoogleサインイン等への拡張は妨げない）。
+
+#### データモデル（Firestore）
+
+```
+users/{uid}/shelf_items/{itemId}      … シェルフのメタデータ（ファイル名・パス・タグ等。ファイル本体は同期しない）
+users/{uid}/clipboard_history/{itemId} … クリップボード履歴のうち「ピン留め済みのみ」を同期対象とする
+```
+
+- ファイル本体（シェルフに置かれた実ファイル）は容量・プライバシーの観点からFirestoreに乗せない。同期されるのはメタデータのみとし、ファイル本体同期はスコープ外（将来Firebase Storageの追加を検討する余地はあるが本設計には含めない）
+- クリップボード履歴は全件同期すると量・プライバシー面のリスクが大きいため、**ピン留め済み（F-13）のみ**を同期対象とする
+- ローカルSQLite側の各テーブルに`updated_at`（更新時刻）カラムを追加し、Firestore側のドキュメントにも同じ`updated_at`フィールドを持たせる
+
+#### 同期戦略
+
+- 個人利用が前提で同時編集の衝突は稀という想定のもと、**Last-Write-Wins**（`updated_at`が新しい方を採用）とする。複雑な差分マージ・3-way mergeは行わない
+- クラウド→ローカル: Firestoreの`onSnapshot`によるリアルタイムリスナーで変更を購読し、ローカルSQLiteへTauriコマンド経由で反映する
+- ローカル→クラウド: シェルフへの追加/削除、ピン留めの追加/解除等のイベント発生時に都度Firestoreへアップロードする
+
+#### 実装配置
+
+同期ロジックはOS非依存のため、Rust側（`src-tauri/`）ではなくフロントエンド（`src/`, TypeScript）に置く。Firebase Web SDK（`firebase`パッケージの`firebase/app` `firebase/auth` `firebase/firestore`、モジュラーAPI）をTauriのWebViewから直接利用する。Rust側の変更は不要。
+
+Firebase構成（`apiKey`等）とサインイン用のEmail/Passwordは、既存の`tauri-plugin-store`（`settings.json`）に保存する。これは既存の他の設定項目と同じ保存先・同じ平文JSONであり、セキュリティレベルは既存実装と同水準（ローカル端末上のファイルであり、リモートへは送信しない）。パスワードの秘匿化（OSキーチェーン連携等）は将来の改善課題とし、初期実装のスコープには含めない。
+
+#### Firestoreセキュリティルール（設定例）
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
+```
+
+#### スコープ外（将来検討）
+
+- ファイル本体そのものの同期（Firebase Storage等の追加が必要）
+- E2E暗号化（Firestore側管理者からは平文で見える。個人の1アカウント運用が前提のため初期スコープには含めない）
+- 複数アカウント/共有機能
 
 ---
 

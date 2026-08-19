@@ -1,4 +1,4 @@
-# Shelf Drop（仮称）
+# Ledge
 
 Windows / macOS 両対応のファイル一時置き場（シェルフ）＋クリップボード履歴管理アプリ。
 
