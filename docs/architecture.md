@@ -261,6 +261,31 @@ F-07（プレビュー）実装で画像をwebviewから直接読み込むため
 
 ---
 
-## 9. フェーズと本ドキュメントの対応
+## 9. Phase4 追加設計（F-14, F-15, F-17）
+
+### 9.1 F-14（検索）
+
+Phase2で`clipboard_list_history(query)`は既にLIKE検索を受け付けているが、`%`/`_`のエスケープをしていない既知の課題がある（`docs/architecture.md`旧版・実装報告に記載）。Phase4でこれを解消する: ユーザー入力中の`%`/`_`/`\`をエスケープした上で`LIKE ?1 ESCAPE '\'`を使う。検索対象は`text_content`と`file_paths_json`（Phase2と同様）に加え、Phase4で追加する`tags.name`とのJOINも対象にしてよい（タグ名検索）。
+
+### 9.2 F-15（スタック/マージ）
+
+`clipboard_history`の意味論として「結合＝新しいテキストアイテムの生成」とする（`architecture.md` 2章末尾に既述）。対象は`content_type = 'text'`のアイテムのみ（画像・ファイルパスは対象外。UIの複数選択モードでは選択不可にする）。選択順（一覧での表示順、ピン留め優先ソート後の順）で改行区切りに結合し、新規テキストエントリとして`clipboard_repo::record_entry`相当の経路でINSERTする。元の個別アイテムは削除しない（結合はコピーであり移動ではない、という判断。要件に明記が無いための裁量）。コマンド名: `clipboard_stack_entries(ids: number[]) -> ClipboardEntry`。
+
+### 9.3 F-17（タグ/カテゴリ）
+
+`tags` / `clipboard_tags`テーブルは既にDDLに存在する（`architecture.md` 2章）。Phase4で以下のコマンドを追加する:
+
+| コマンド | 引数 | 説明 |
+|---|---|---|
+| `tags_list` | - | タグ一覧取得 |
+| `tags_create` | `name, color` | タグ作成（name UNIQUE制約違反は`ShelfError`で返す） |
+| `tags_delete` | `id` | タグ削除（`clipboard_tags`はON DELETE CASCADEなので関連付けも自動削除） |
+| `clipboard_set_tags` | `id, tagIds: number[]` | 指定エントリのタグ付けを一括置き換え（差分diffではなく全置換が実装しやすくバグりにくいための判断） |
+
+一覧取得（`clipboard_list_history`）にタグによるフィルタ引数（`tagId?: number`）を追加する。色は自由入力のhexカラーコード文字列（`#RRGGBB`）とし、プリセットパレットはフロント側でUIの利便性として提示するだけでよい（DB制約は設けない）。
+
+---
+
+## 10. フェーズと本ドキュメントの対応
 
 CLAUDE.mdのフェーズ一覧・機能IDとの対応は`requirements.md` 7章の通り。本ドキュメントの各セクションはPhase1〜4を横断して先取りした設計になっているが、実装はフェーズ順に行い、未着手フェーズのテーブル/コマンドはマイグレーション・コード上に用意しても機能としては呼び出さない（UIから到達不可にする）。
