@@ -23,30 +23,51 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 | データ永続化 | SQLite（rusqlite） |
 | クリップボード抽象化 | arboard または clipboard-rs |
 | グローバルホットキー | tauri-plugin-global-shortcut |
-| Windows D&D | windows-rs（COM / IDropTarget） |
-| macOS D&D | NSPasteboard / NSDraggingSession（Tauri経由） |
+| Windows D&D | `drag`クレート（tauri-plugin-dragが内部で使用するものと同一。COM/IDropTargetベース） |
+| macOS D&D | `drag`クレート（NSPasteboard/NSDraggingSessionベース） |
 
 ## 現在の状態
 
-**2026-08-19時点、実装未着手（Phase 0）。** 要件定義書とプロジェクト方針のみ存在し、
-`src/` / `src-tauri/` はまだ作成されていない。
+**2026-08-19時点、Phase 1（MVP）完了。** プロジェクトscaffold一式（Svelte 5 + TypeScript + Vite、
+Tauri v2 + Rust）を作成し、以下の機能を実装済み。
+
+- F-01: グローバルホットキー（既定 `Ctrl+Alt+S` / `Cmd+Option+S`）でシェルフウィンドウの表示/非表示をトグル
+- F-02: ファイル/フォルダをシェルフへドラッグ&ドロップして格納（実体コピーはせずパス参照のみ保持）
+- F-03: シェルフ内アイテムを外部アプリ/フォルダへドラッグして送り出す（Windows/macOSのみ。`drag`クレートを利用）
+- F-04: 複数アイテムの保持・個別操作
+- F-05: 個別削除・一括削除
+- F-18: システムトレイ常駐（左クリックでシェルフ表示トグル、右クリックメニュー）
+- F-20: グローバルホットキーの登録を設定値（`settings.json`）駆動にする仕組み（カスタマイズUI自体はPhase3）
+
+クリップボード履歴（F-11〜）・設定画面UI・ロック機能（F-06）等はPhase2以降で対応する。
+このLinux開発コンテナではWindows/macOS固有コード（`drag_drop/native.rs`）は
+コンパイル対象外のため、静的レビューに留めている（`architecture.md` 7章参照）。
 
 実装フェーズの進捗は [CLAUDE.md](CLAUDE.md) のチェックリストで管理する。
 
-- [ ] Phase 1（MVP）: 常駐シェルフ + ファイルD&D格納
+- [x] Phase 1（MVP）: 常駐シェルフ + ファイルD&D格納
 - [ ] Phase 2: クリップボード履歴 + ピン留め
 - [ ] Phase 3: Windows側自動検出、表示設定、自動起動
 - [ ] Phase 4: 検索・タグ・スタック
 - [ ] Phase 5: macOS側自動検出、同期検討
 
-## 開発コマンド（seed、実装開始時に更新）
+## 開発コマンド
 
 ```bash
-# 開発サーバー起動
+# フロントエンドの依存関係をインストール
+npm install
+
+# 開発サーバー起動（Tauriアプリとして起動。Windows/macOS環境が必要）
 npm run tauri dev
 
 # ビルド
 npm run tauri build
+
+# フロントエンドの型チェック（svelte-check）
+npm run check
+
+# Rust側の型チェック（src-tauriディレクトリ内で実行）
+cd src-tauri && cargo check
 ```
 
 ## ドキュメント
