@@ -48,3 +48,9 @@ windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Da
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
+# drag_watch/macos.rs（F-08）用。NSEventのハンドラブロック構築にblock2、グローバルモニタの
+# 登録/解除をメインスレッドへディスパッチするためにdispatch2（run_on_main/MainThreadBound）を使う。
+# いずれもobjc2-app-kitの依存として既にビルドグラフに含まれるが、これらのAPIを直接呼ぶため
+# 明示的な直接依存として追加する。
+block2 = "0.6.2"
+dispatch2 = "0.3.1"

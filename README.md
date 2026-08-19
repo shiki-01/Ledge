@@ -28,7 +28,10 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 
 ## 現在の状態
 
-**2026-08-19時点、Phase 4（検索・スタック・タグ）完了。** Phase 1〜3に加えて以下の機能を実装済み。
+**2026-08-19時点、Phase 5のうち実装可能な範囲（F-08のmacOS側）まで完了。** F-22（デバイス間同期）は
+同期方式（自前サーバー/クラウドストレージ経由/エクスポート・インポートのみ、等）自体がユーザー本人の
+判断を要する事項のため未着手（`docs/requirements.md` D-7、`docs/architecture.md` 10.2章）。それ以外は
+Phase 1〜4に加えて以下の機能を実装済み。
 
 - F-01: グローバルホットキー（既定 `Ctrl+Alt+S` / `Cmd+Option+S`）でシェルフウィンドウの表示/非表示をトグル
 - F-02: ファイル/フォルダをシェルフへドラッグ&ドロップして格納（実体コピーはせずパス参照のみ保持）
@@ -38,8 +41,9 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 - F-06: ロック機能（ロック中のアイテムは「全て削除」の対象から除外。個別削除は可能）
 - F-07: プレビュー表示（ホバーで画像/ファイル情報のポップオーバー表示。画像はasset protocol経由で実画像、
   それ以外は拡張子ベースのアイコン＋ファイル名/サイズ/更新日時）
-- F-08（Windows先行）: `WH_MOUSE_LL`低レベルマウスフックによるドラッグ開始のヒューリスティック検知で
-  シェルフを自動表示（設定でON/OFF可能。実機未検証、`docs/architecture.md` 8.1章参照）
+- F-08: ドラッグ開始のヒューリスティック検知でシェルフを自動表示（設定でON/OFF可能。Windowsは
+  `WH_MOUSE_LL`低レベルマウスフック、macOSは`NSEvent`グローバルモニタ（要アクセシビリティ権限）。
+  いずれも実機未検証、`docs/architecture.md` 8.1章・10.1章参照）
 - F-10: シェルフの表示位置（上下左右）・透明度を設定画面から変更可能（即時反映）
 - F-11: テキスト/画像/ファイルパスのクリップボード履歴を自動記録（Windows: `AddClipboardFormatListener`
   イベント駆動、macOS: `NSPasteboard.changeCount`ポーリング。除外規約
@@ -59,9 +63,9 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 シェルフ・クリップボード履歴・設定は1つのウィンドウ内でタブ切り替えする形にしている
 （別ウィンドウ化はPhase3で再検討したが、既存のタブ切り替え方式との一貫性を優先した）。
 このLinux開発コンテナではWindows/macOS固有コード（`drag_drop/native.rs`、
-`clipboard/windows.rs`、`clipboard/macos.rs`、`drag_watch/windows.rs`）はコンパイル対象外のため、
-静的レビューに留めている（`docs/architecture.md` 7章参照）。特に`drag_watch/windows.rs`は
-実機での動作確認が未実施。
+`clipboard/windows.rs`、`clipboard/macos.rs`、`drag_watch/windows.rs`、`drag_watch/macos.rs`）は
+コンパイル対象外のため、静的レビューに留めている（`docs/architecture.md` 7章参照）。特に
+`drag_watch/windows.rs`・`drag_watch/macos.rs`は実機での動作確認が未実施。
 
 実装フェーズの進捗は [CLAUDE.md](CLAUDE.md) のチェックリストで管理する。
 
@@ -69,7 +73,7 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 - [x] Phase 2: クリップボード履歴 + ピン留め
 - [x] Phase 3: Windows側自動検出、表示設定、自動起動
 - [x] Phase 4: 検索・タグ・スタック
-- [ ] Phase 5: macOS側自動検出、同期検討
+- [ ] Phase 5: macOS側自動検出、同期検討（F-08(Mac)実装済み・未検証／F-22はユーザー判断待ちのため未着手）
 
 ## 開発コマンド
 

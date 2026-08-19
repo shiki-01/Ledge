@@ -1,12 +1,17 @@
-//! F-08: OS全体でのドラッグ操作開始検知によるシェルフ自動表示（Windows先行、architecture.md 8.1章）。
+//! F-08: OS全体でのドラッグ操作開始検知によるシェルフ自動表示
+//! （Windows: architecture.md 8.1章、macOS: architecture.md 10.1章）。
 //!
 //! Windowsには「OS全体でドラッグ操作が始まったこと」を通知する高レベルAPIが存在しないため、
 //! `WH_MOUSE_LL`（低レベルマウスフック）で「左ボタン押下→一定距離以上の移動」パターンを
-//! ヒューリスティックに検知する（実装は`windows.rs`）。誤検知は許容し、シェルフの自動表示自体は
-//! 非破壊的操作として扱う。macOS版（Accessibility API依存が濃厚）はPhase5で別途検討するため、
-//! 本フェーズでは`dev_stub`（no-op）のみを用意する。
+//! ヒューリスティックに検知する（実装は`windows.rs`）。macOSでは`NSEvent`のグローバルモニタで
+//! 同じヒューリスティックを踏襲する（実装は`macos.rs`、要アクセシビリティ権限）。誤検知は許容し、
+//! シェルフの自動表示自体は非破壊的操作として扱う。Windows/macOS以外（Linux開発環境）では
+//! `dev_stub`（no-op）を使う。
 
 pub mod dev_stub;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
@@ -27,14 +32,19 @@ pub trait DragWatcher: Send {
 }
 
 /// 実行環境に応じた`DragWatcher`実装を生成する。
-/// Windowsでは低レベルマウスフックによる実装、それ以外（macOS/Linux開発環境）では
-/// `dev_stub`のno-op実装を使う（macOS対応はPhase5、architecture.md 8.1章）。
+/// Windowsでは低レベルマウスフック、macOSでは`NSEvent`グローバルモニタによる実装を使う
+/// （architecture.md 8.1章・10.1章）。それ以外（Linux開発環境）では`dev_stub`のno-op実装を使う。
 #[cfg(target_os = "windows")]
 pub fn create_watcher() -> Box<dyn DragWatcher> {
     Box::new(windows::WindowsDragWatcher::new())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub fn create_watcher() -> Box<dyn DragWatcher> {
+    Box::new(macos::MacDragWatcher::new())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn create_watcher() -> Box<dyn DragWatcher> {
     Box::new(dev_stub::DevStubDragWatcher::new())
 }
