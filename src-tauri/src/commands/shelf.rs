@@ -45,6 +45,22 @@ pub fn shelf_remove_item(
     Ok(())
 }
 
+/// ロック状態の変更（F-06）。
+#[tauri::command]
+pub fn shelf_set_locked(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    locked: bool,
+) -> Result<(), ShelfError> {
+    {
+        let conn = state.db.0.lock().map_err(lock_err)?;
+        shelf_repo::set_locked(&conn, id, locked)?;
+    }
+    notify_items_changed(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn shelf_clear(
     app: AppHandle,

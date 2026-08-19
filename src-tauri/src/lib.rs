@@ -4,6 +4,7 @@
 pub mod clipboard;
 pub mod commands;
 pub mod drag_drop;
+pub mod drag_watch;
 pub mod error;
 pub mod settings;
 pub mod shortcut;
@@ -12,6 +13,7 @@ pub mod tray;
 pub mod window;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
@@ -26,6 +28,9 @@ pub struct AppState {
     pub clipboard_guard: clipboard::SelfWriteGuard,
     /// クリップボード画像キャッシュの保存先（`app_data_dir`配下、requirements.md 10.2章）。
     pub clipboard_cache_dir: PathBuf,
+    /// ドラッグ開始検知（F-08 Windows先行）の監視インスタンス。設定変更時に`stop()`/`start()`
+    /// できるよう、clipboard watcherと異なりリークさせずMutexで保持する。
+    pub drag_watcher: Mutex<Box<dyn drag_watch::DragWatcher>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,7 +41,13 @@ pub fn run() {
             window::show_shelf(app);
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::new().build());
+        .plugin(tauri_plugin_store::Builder::new().build())
+        // F-19（自動起動）。Windows/macOS/Linuxいずれでも動作するため、target cfgでは絞り込まない。
+        // macOS向けのlauncher種別はLaunchAgent方式を採用する（もう一方の選択肢はAppleScript経由）。
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     // F-03（アウトバウンドドラッグ）用プラグイン。Rust側からは`drag`クレートを直接呼んでいるため
     // 必須ではないが、将来フロントエンドから直接ドラッグを開始したくなった場合に備えて登録しておく
@@ -53,15 +64,31 @@ pub fn run() {
             let db_path = resolve_db_path(&app_handle)?;
             let db = Db::connect(&db_path)?;
             let clipboard_cache_dir = resolve_clipboard_cache_dir(&app_handle)?;
+
+            let settings = settings::load_settings(&app_handle)?;
+
+            // ドラッグ開始検知（F-08 Windows先行）。設定でON/OFFできるため、Mutexで保持して
+            // 後から`drag_watch::set_enabled`経由でstart/stopできるようにする
+            // （clipboard watcherと異なりBox::leakしない、迷った設計判断: 呼び出し元へ報告）。
+            let mut drag_watcher = drag_watch::create_watcher();
+            if settings.auto_show_on_drag_start {
+                let start_handle = app_handle.clone();
+                let end_handle = app_handle.clone();
+                drag_watcher.start(
+                    Box::new(move || window::show_shelf_auto(&start_handle)),
+                    Box::new(move || window::hide_shelf_if_auto(&end_handle)),
+                )?;
+            }
+
             app.manage(AppState {
                 db,
                 clipboard_guard: clipboard::SelfWriteGuard::new(),
                 clipboard_cache_dir,
+                drag_watcher: std::sync::Mutex::new(drag_watcher),
             });
 
             tray::setup_tray(&app_handle)?;
 
-            let settings = settings::load_settings(&app_handle)?;
             shortcut::register_shortcuts(&app_handle, &settings)?;
 
             // クリップボード監視を開始する（F-11）。監視スレッドは検知のたびに
@@ -90,6 +117,7 @@ pub fn run() {
             commands::shelf::shelf_list_items,
             commands::shelf::shelf_add_paths,
             commands::shelf::shelf_remove_item,
+            commands::shelf::shelf_set_locked,
             commands::shelf::shelf_clear,
             commands::shelf::shelf_begin_drag_out,
             commands::clipboard::clipboard_list_history,

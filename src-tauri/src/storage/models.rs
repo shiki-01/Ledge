@@ -43,6 +43,11 @@ pub struct ShelfItem {
     pub sort_order: i64,
     pub added_at: String,
     pub missing: bool,
+    /// 元ファイルの最終更新日時（Unixエポックミリ秒）。DBには保存せず`missing`と同様に
+    /// 一覧取得のたびにファイルシステムから算出する（F-07プレビュー表示用。取得できない場合は
+    /// `None`）。フォーマットはフロント側（`Date`）に委ねる（迷った設計判断: Rust側に日付
+    /// フォーマット用の依存を増やさないための選択）。
+    pub modified_at_ms: Option<i64>,
 }
 
 /// クリップボード履歴アイテムの内容種別（Phase2, F-11）。

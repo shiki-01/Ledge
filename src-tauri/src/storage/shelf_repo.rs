@@ -23,6 +23,7 @@ pub fn list_items(conn: &Connection) -> Result<Vec<ShelfItem>, ShelfError> {
             let item_type: String = row.get(1)?;
             let source_path: String = row.get(2)?;
             let locked: i64 = row.get(5)?;
+            let modified_at_ms = read_modified_at_ms(Path::new(&source_path));
             Ok(ShelfItem {
                 id: row.get(0)?,
                 item_type: ShelfItemType::from_db_str(&item_type),
@@ -33,6 +34,7 @@ pub fn list_items(conn: &Connection) -> Result<Vec<ShelfItem>, ShelfError> {
                 locked: locked != 0,
                 sort_order: row.get(6)?,
                 added_at: row.get(7)?,
+                modified_at_ms,
             })
         })
         .map_err(db_err)?;
@@ -107,10 +109,20 @@ pub fn add_paths(conn: &Connection, paths: &[String]) -> Result<Vec<ShelfItem>, 
             sort_order,
             added_at,
             missing: !path.exists(),
+            modified_at_ms: read_modified_at_ms(path),
         });
     }
 
     Ok(added)
+}
+
+/// ファイルの最終更新日時をUnixエポックミリ秒で取得する（F-07プレビュー用）。
+/// 存在しない/取得できない場合は`None`を返す（`missing`判定と同様、エラーにはしない）。
+fn read_modified_at_ms(path: &Path) -> Option<i64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(duration.as_millis()).ok()
 }
 
 /// 個別削除。
@@ -124,13 +136,31 @@ pub fn remove_item(conn: &Connection, id: i64) -> Result<(), ShelfError> {
     Ok(())
 }
 
+/// ロック状態を変更する（F-06）。
+pub fn set_locked(conn: &Connection, id: i64, locked: bool) -> Result<(), ShelfError> {
+    let affected = conn
+        .execute(
+            "UPDATE shelf_items SET locked = ?1 WHERE id = ?2",
+            params![locked as i64, id],
+        )
+        .map_err(db_err)?;
+    if affected == 0 {
+        return Err(ShelfError::NotFound(format!("shelf item id={id}")));
+    }
+    Ok(())
+}
+
 /// 一括削除。
 ///
-/// F-06（ロックによる全消去除外）はPhase3で実装するため、Phase1では`exclude_locked`の値に
-/// かかわらず常に全件削除する（DDLの`locked`カラム自体はPhase1から用意済み）。
-pub fn clear(conn: &Connection, _exclude_locked: bool) -> Result<(), ShelfError> {
-    conn.execute("DELETE FROM shelf_items", [])
-        .map_err(db_err)?;
+/// `exclude_locked=true`の場合、ロック済みアイテム（F-06）は削除対象から除外する
+/// （requirements.md 10.1章）。個別削除（`remove_item`）はロック状態にかかわらず可能。
+pub fn clear(conn: &Connection, exclude_locked: bool) -> Result<(), ShelfError> {
+    if exclude_locked {
+        conn.execute("DELETE FROM shelf_items WHERE locked = 0", [])
+    } else {
+        conn.execute("DELETE FROM shelf_items", [])
+    }
+    .map_err(db_err)?;
     Ok(())
 }
 
@@ -209,14 +239,56 @@ mod tests {
     }
 
     #[test]
-    fn clear_removes_all_items_regardless_of_lock_flag() {
+    fn clear_with_exclude_locked_false_removes_all_items() {
         let db = setup();
         let conn = db.0.lock().unwrap();
 
         add_paths(&conn, &["/tmp/a.txt".to_string(), "/tmp/b.txt".to_string()]).unwrap();
-        clear(&conn, true).unwrap();
+        clear(&conn, false).unwrap();
 
         let items = list_items(&conn).unwrap();
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn clear_with_exclude_locked_true_keeps_locked_items() {
+        let db = setup();
+        let conn = db.0.lock().unwrap();
+
+        let added = add_paths(&conn, &["/tmp/a.txt".to_string(), "/tmp/b.txt".to_string()]).unwrap();
+        set_locked(&conn, added[0].id, true).unwrap();
+
+        clear(&conn, true).unwrap();
+
+        let items = list_items(&conn).unwrap();
+        assert_eq!(items.len(), 1, "ロック済みアイテムだけが残るはず");
+        assert_eq!(items[0].id, added[0].id);
+        assert!(items[0].locked);
+    }
+
+    #[test]
+    fn set_locked_toggles_flag() {
+        let db = setup();
+        let conn = db.0.lock().unwrap();
+
+        let added = add_paths(&conn, &["/tmp/a.txt".to_string()]).unwrap();
+        assert!(!added[0].locked);
+
+        set_locked(&conn, added[0].id, true).unwrap();
+        let items = list_items(&conn).unwrap();
+        assert!(items[0].locked);
+
+        set_locked(&conn, added[0].id, false).unwrap();
+        let items = list_items(&conn).unwrap();
+        assert!(!items[0].locked);
+    }
+
+    #[test]
+    fn set_locked_errors_when_not_found() {
+        let db = setup();
+        let conn = db.0.lock().unwrap();
+
+        let result = set_locked(&conn, 999, true);
+        assert!(matches!(result, Err(ShelfError::NotFound(_))));
     }
 }

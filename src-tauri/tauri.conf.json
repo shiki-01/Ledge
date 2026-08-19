@@ -30,7 +30,10 @@
     "security": {
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/clipboard-cache/*"]
+        "scope": [
+          "$APPDATA/clipboard-cache/*",
+          "**"
+        ]
       }
     }
   },

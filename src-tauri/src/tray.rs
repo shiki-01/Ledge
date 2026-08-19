@@ -1,7 +1,8 @@
 //! システムトレイ常駐（F-18）。
 //!
 //! 左クリックでシェルフ表示切り替え、右クリックメニューは
-//! 「シェルフを表示」「設定...(準備中・disabled)」「終了」。
+//! 「シェルフを表示」「設定...」「終了」。「設定...」はPhase3でSettings.svelte（設定タブ）を
+//! 実装したため有効化した。
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -18,8 +19,7 @@ const MENU_ID_QUIT: &str = "quit";
 pub fn setup_tray(app: &AppHandle) -> Result<(), ShelfError> {
     let show_item = MenuItem::with_id(app, MENU_ID_SHOW_SHELF, "シェルフを表示", true, None::<&str>)
         .map_err(tray_err)?;
-    // 設定画面(Settings.svelte)はPhase3で実装するため、メニュー項目は用意しつつ無効化しておく
-    let settings_item = MenuItem::with_id(app, MENU_ID_SETTINGS, "設定...(準備中)", false, None::<&str>)
+    let settings_item = MenuItem::with_id(app, MENU_ID_SETTINGS, "設定...", true, None::<&str>)
         .map_err(tray_err)?;
     let quit_item = MenuItem::with_id(app, MENU_ID_QUIT, "終了", true, None::<&str>).map_err(tray_err)?;
 
@@ -38,6 +38,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), ShelfError> {
         .tooltip("Shelf Drop")
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_ID_SHOW_SHELF => window::show_shelf(app),
+            MENU_ID_SETTINGS => window::show_settings(app),
             MENU_ID_QUIT => app.exit(0),
             _ => {}
         })

@@ -20,6 +20,8 @@ tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-store = "2"
 tauri-plugin-single-instance = "2"
+# F-19（自動起動）。Windows/macOS/Linuxいずれでも動作するプラグインのため、target cfgで絞り込まない。
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
@@ -38,7 +40,9 @@ tauri-plugin-drag = "2"
 drag = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_LibraryLoader", "Win32_System_Ole"] }
+# Win32_System_Threading: GetCurrentThreadId用（clipboard/windows.rsとdrag_watch/windows.rsの両方で使用）。
+# Win32_UI_HiDpi: drag_watch/windows.rsのDPIスケール取得（GetDpiForSystem）用（F-08）。
+windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_HiDpi"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
