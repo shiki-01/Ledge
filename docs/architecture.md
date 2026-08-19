@@ -334,7 +334,9 @@ users/{uid}/clipboard_history/{itemId} … クリップボード履歴のうち�
 
 #### 実装配置
 
-同期ロジックはOS非依存のため、Rust側（`src-tauri/`）ではなくフロントエンド（`src/`, TypeScript）に置く。Firebase Web SDK（`firebase`パッケージの`firebase/app` `firebase/auth` `firebase/firestore`、モジュラーAPI）をTauriのWebViewから直接利用する。Rust側の変更は不要。
+同期ロジック本体（Firestoreへのpush/pull・リアルタイムリスナー）はOS非依存のため、Rust側（`src-tauri/`）ではなくフロントエンド（`src/`, TypeScript）に置く。Firebase Web SDK（`firebase`パッケージの`firebase/app` `firebase/auth` `firebase/firestore`、モジュラーAPI）をTauriのWebViewから直接利用する。
+
+ただし、サインイン用パスワードを`AppSettings`（`get_settings`がまるごとフロントへ返す構造体）の外に置く目的で、書き込み専用のTauriコマンド`sync_set_firebase_password`（`src-tauri/src/commands/settings.rs`）を1つ追加している。これは同期ロジックそのものではなく、既存の設定永続化の枠組み（`tauri-plugin-store`）にもう1キー追加するだけの薄いRust側変更であり、上記「フロントに置く」方針とは矛盾しない。
 
 Firebase構成（`apiKey`等）とサインイン用のEmail/Passwordは、既存の`tauri-plugin-store`（`settings.json`）に保存する。これは既存の他の設定項目と同じ保存先・同じ平文JSONであり、セキュリティレベルは既存実装と同水準（ローカル端末上のファイルであり、リモートへは送信しない）。パスワードの秘匿化（OSキーチェーン連携等）は将来の改善課題とし、初期実装のスコープには含めない。
 

@@ -144,6 +144,7 @@ pub fn run() {
             commands::tags::clipboard_set_tags,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::settings::sync_set_firebase_password,
         ])
         .run(tauri::generate_context!())
         .expect("Ledge の起動に失敗しました");

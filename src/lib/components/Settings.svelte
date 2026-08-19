@@ -9,8 +9,9 @@
    * 反映する（迷った設計判断）。
    */
   import { settingsStore } from "../stores/settingsStore";
-  import { updateSettings } from "../api/commands";
+  import { updateSettings, syncSetFirebasePassword } from "../api/commands";
   import { isShelfErrorPayload } from "../types/error";
+  import { testFirebaseConnection } from "../sync/firebase";
   import type { AppSettingsPatch, ShelfEdge } from "../types/settings";
 
   let errorMessage = $state<string | null>(null);
@@ -18,11 +19,31 @@
 
   let hotkeyDraft = $state("");
 
+  // F-22（デバイス間同期）: Firebase構成のテキスト入力はホットキーと同様blur/Enter確定にする
+  // （入力の都度invokeすると打鍵中に何度も設定ファイルへ書き込むことになるため）。
+  let firebaseApiKeyDraft = $state("");
+  let firebaseAuthDomainDraft = $state("");
+  let firebaseProjectIdDraft = $state("");
+  let firebaseAppIdDraft = $state("");
+  let firebaseEmailDraft = $state("");
+  // パスワードは`AppSettings`（get_settingsのレスポンス）に一切含めない設計のため、ストアから
+  // 復元することはできない。設定画面を開き直すたびに空欄から入力し直す想定（迷った設計判断:
+  // 書き込み専用コマンドsyncSetFirebasePassword経由でのみ保存する。api/commands.ts参照）。
+  let firebasePasswordDraft = $state("");
+
+  let testingConnection = $state(false);
+  let testResult = $state<{ ok: boolean; message: string } | null>(null);
+
   // ストアの値が変わるたび（初回取得・他画面からの変更どちらも）ドラフトを同期する
   $effect(() => {
     const current = $settingsStore;
     if (current) {
       hotkeyDraft = current.shelfHotkey;
+      firebaseApiKeyDraft = current.firebaseApiKey ?? "";
+      firebaseAuthDomainDraft = current.firebaseAuthDomain ?? "";
+      firebaseProjectIdDraft = current.firebaseProjectId ?? "";
+      firebaseAppIdDraft = current.firebaseAppId ?? "";
+      firebaseEmailDraft = current.firebaseEmail ?? "";
     }
   });
 
@@ -78,6 +99,79 @@
     const value = Number((e.target as HTMLInputElement).value);
     if (Number.isNaN(value) || value < 1) return;
     void apply({ clipboardRetentionDays: Math.trunc(value) });
+  }
+
+  function handleSyncEnabledChange(e: Event): void {
+    const checked = (e.target as HTMLInputElement).checked;
+    void apply({ syncEnabled: checked });
+  }
+
+  function handleFirebaseApiKeySubmit(): void {
+    if (!$settingsStore || firebaseApiKeyDraft === ($settingsStore.firebaseApiKey ?? "")) return;
+    void apply({ firebaseApiKey: firebaseApiKeyDraft });
+  }
+
+  function handleFirebaseAuthDomainSubmit(): void {
+    if (!$settingsStore || firebaseAuthDomainDraft === ($settingsStore.firebaseAuthDomain ?? "")) return;
+    void apply({ firebaseAuthDomain: firebaseAuthDomainDraft });
+  }
+
+  function handleFirebaseProjectIdSubmit(): void {
+    if (!$settingsStore || firebaseProjectIdDraft === ($settingsStore.firebaseProjectId ?? "")) return;
+    void apply({ firebaseProjectId: firebaseProjectIdDraft });
+  }
+
+  function handleFirebaseAppIdSubmit(): void {
+    if (!$settingsStore || firebaseAppIdDraft === ($settingsStore.firebaseAppId ?? "")) return;
+    void apply({ firebaseAppId: firebaseAppIdDraft });
+  }
+
+  function handleFirebaseEmailSubmit(): void {
+    if (!$settingsStore || firebaseEmailDraft === ($settingsStore.firebaseEmail ?? "")) return;
+    void apply({ firebaseEmail: firebaseEmailDraft });
+  }
+
+  async function handleFirebasePasswordSubmit(): Promise<void> {
+    if (firebasePasswordDraft === "") return;
+    try {
+      await syncSetFirebasePassword(firebasePasswordDraft);
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  /** 「接続テスト」ボタン: 現在ドラフト中の構成・Email/Passwordでサインインを試みる（F-22）。 */
+  async function handleTestConnection(): Promise<void> {
+    testResult = null;
+    if (
+      !firebaseApiKeyDraft ||
+      !firebaseAuthDomainDraft ||
+      !firebaseProjectIdDraft ||
+      !firebaseAppIdDraft ||
+      !firebaseEmailDraft ||
+      !firebasePasswordDraft
+    ) {
+      testResult = { ok: false, message: "Firebase構成・Email・Passwordをすべて入力してください" };
+      return;
+    }
+    testingConnection = true;
+    try {
+      const result = await testFirebaseConnection(
+        {
+          apiKey: firebaseApiKeyDraft,
+          authDomain: firebaseAuthDomainDraft,
+          projectId: firebaseProjectIdDraft,
+          appId: firebaseAppIdDraft,
+        },
+        firebaseEmailDraft,
+        firebasePasswordDraft,
+      );
+      testResult = result.ok
+        ? { ok: true, message: "接続に成功しました" }
+        : { ok: false, message: `接続に失敗しました（${result.errorCode}）: ${result.message}` };
+    } finally {
+      testingConnection = false;
+    }
   }
 </script>
 
@@ -180,6 +274,114 @@
           />
         </div>
       </section>
+
+      <section class="settings__section">
+        <h3 class="settings__section-title">デバイス間同期（F-22, Bring Your Own Firebase）</h3>
+        <div class="settings__row settings__row--checkbox">
+          <label>
+            <input type="checkbox" checked={s.syncEnabled} onchange={handleSyncEnabledChange} />
+            デバイス間同期を有効にする
+          </label>
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-api-key">Firebase apiKey</label>
+          <input
+            id="firebase-api-key"
+            class="settings__input"
+            type="text"
+            bind:value={firebaseApiKeyDraft}
+            onblur={handleFirebaseApiKeySubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") handleFirebaseApiKeySubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-auth-domain">Firebase authDomain</label>
+          <input
+            id="firebase-auth-domain"
+            class="settings__input"
+            type="text"
+            bind:value={firebaseAuthDomainDraft}
+            onblur={handleFirebaseAuthDomainSubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") handleFirebaseAuthDomainSubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-project-id">Firebase projectId</label>
+          <input
+            id="firebase-project-id"
+            class="settings__input"
+            type="text"
+            bind:value={firebaseProjectIdDraft}
+            onblur={handleFirebaseProjectIdSubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") handleFirebaseProjectIdSubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-app-id">Firebase appId</label>
+          <input
+            id="firebase-app-id"
+            class="settings__input"
+            type="text"
+            bind:value={firebaseAppIdDraft}
+            onblur={handleFirebaseAppIdSubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") handleFirebaseAppIdSubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-email">サインインEmail</label>
+          <input
+            id="firebase-email"
+            class="settings__input"
+            type="text"
+            bind:value={firebaseEmailDraft}
+            onblur={handleFirebaseEmailSubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") handleFirebaseEmailSubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <label class="settings__label" for="firebase-password">サインインPassword</label>
+          <input
+            id="firebase-password"
+            class="settings__input"
+            type="password"
+            bind:value={firebasePasswordDraft}
+            onblur={handleFirebasePasswordSubmit}
+            onkeydown={(e) => {
+              if (e.key === "Enter") void handleFirebasePasswordSubmit();
+            }}
+          />
+        </div>
+        <div class="settings__row">
+          <button
+            type="button"
+            class="settings__button"
+            disabled={testingConnection}
+            onclick={handleTestConnection}
+          >
+            {testingConnection ? "接続確認中…" : "接続テスト"}
+          </button>
+        </div>
+        {#if testResult}
+          <p class="settings__hint" class:settings__hint--error={!testResult.ok}>
+            {testResult.message}
+          </p>
+        {/if}
+        <p class="settings__hint">
+          Firebase Consoleで自分のプロジェクトを作成し、Firestore と
+          Authentication（Email/Password）を有効化してください。構成情報とサインインアカウントの
+          作成方法は architecture.md 10.2章を参照してください。
+        </p>
+      </section>
     </div>
   {/if}
 </div>
@@ -265,5 +467,27 @@
     margin: 0.2rem 0 0;
     font-size: 0.68rem;
     opacity: 0.55;
+  }
+
+  .settings__hint--error {
+    opacity: 0.9;
+    color: #f87171;
+  }
+
+  .settings__button {
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: inherit;
+    border-radius: 4px;
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .settings__button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

@@ -97,3 +97,12 @@ export function getSettings(): Promise<AppSettings> {
 export function updateSettings(patch: AppSettingsPatch): Promise<AppSettings> {
   return invoke<AppSettings>("update_settings", { patch });
 }
+
+/**
+ * F-22同期用Firebaseサインインパスワードの書き込み専用コマンド。`getSettings`（`AppSettings`）の
+ * レスポンスには含まれないため、取得用の対になる関数はない（設計判断はSettings.svelte側コメント参照）。
+ * 空文字を渡すと保存済みパスワードを削除する。
+ */
+export function syncSetFirebasePassword(password: string): Promise<void> {
+  return invoke<void>("sync_set_firebase_password", { password });
+}

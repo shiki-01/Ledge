@@ -19,6 +19,15 @@ pub fn get_settings(app: AppHandle) -> Result<AppSettings, ShelfError> {
     settings::load_settings(&app)
 }
 
+/// F-22同期用Firebaseサインインパスワードの書き込み専用コマンド。`AppSettings`（`get_settings`の
+/// レスポンス）には一切含めず、この専用コマンド経由でのみ`settings.json`の別キーへ保存する
+/// （settings/mod.rsの`SYNC_PASSWORD_KEY`コメント参照。迷った設計判断として呼び出し元へ報告）。
+/// 空文字または未入力（フロント側で`undefined`にせず`""`を渡す想定）で保存済みパスワードを削除する。
+#[tauri::command]
+pub fn sync_set_firebase_password(app: AppHandle, password: String) -> Result<(), ShelfError> {
+    settings::set_firebase_password(&app, Some(password.as_str()))
+}
+
 #[tauri::command]
 pub fn update_settings(
     app: AppHandle,
