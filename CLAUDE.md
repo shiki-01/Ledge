@@ -22,7 +22,7 @@ Ledge: Windows / macOS 両対応のファイル一時置き場（シェルフ）
 
 現在のフェーズをここに随時更新すること。
 
-**現在のフェーズ: Phase 5のうち実装可能な範囲まで完了（2026-08-19）。F-22（デバイス間同期）は方式決定済み（各ユーザーが自分のFirebaseプロジェクトを用意するBring Your Own Firebase方式、docs/requirements.md D-7、docs/architecture.md 10.2章）。設定UI・Firebase接続確認までは着手済みで、Firestoreへの実際のデータ同期（push/pull・リアルタイムリスナー）は次段階として未実装。それ以外の全フェーズの実装可能な範囲は完了している。**
+**現在のフェーズ: Phase 5のうち実装可能な範囲まで完了（2026-08-19）。F-22（デバイス間同期）はBring Your Own Firebase方式（docs/requirements.md D-7、docs/architecture.md 10.2章）で、「ピン留め済みテキストのクリップボード履歴」のFirestore実同期（push/pull・リアルタイムリスナー・認証セッション永続化）まで実装済み。shelf_itemsの同期、画像/ファイルパスのピン留め同期は、ファイルパスが端末依存で実用上の価値が薄いとの判断により意図的に対象外（architecture.md 10.2章に理由を明記）。それ以外の全フェーズの実装可能な範囲は完了している。**
 
 - [x] Phase 1（MVP）: 常駐シェルフ + ファイルD&D格納（F-01〜F-05, F-18, F-20）
 - [x] Phase 2: クリップボード履歴 + ピン留め（F-11〜F-13, F-16）
