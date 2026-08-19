@@ -1,13 +1,15 @@
 <script lang="ts">
   import type { ShelfItem } from "../types/shelf";
+  import ShelfItemPreview from "./ShelfItemPreview.svelte";
 
   interface Props {
     item: ShelfItem;
     onRemove: () => void;
     onDragOut: () => void;
+    onToggleLock: () => void;
   }
 
-  let { item, onRemove, onDragOut }: Props = $props();
+  let { item, onRemove, onDragOut, onToggleLock }: Props = $props();
 
   const kindLabel = $derived(item.itemType === "folder" ? "フォルダ" : "ファイル");
 </script>
@@ -18,26 +20,49 @@
   Tauri v2のWindowConfigドキュメントにも「Windowsでフロントエンド側のHTML5 D&Dを使うには
   dragDropEnabledを無効化する必要がある」とあり、F-02のためdragDropEnabledをtrueにしている
   本アプリではHTML5 D&Dと共存しない設計にした（迷った設計判断）。
+
+  プレビュー（F-07）はホバー時にCSSのみで表示するポップオーバーとする。JS側でホバー状態を
+  管理しない分シンプルだが、位置計算はCSSのabsolute配置に限定される（迷った設計判断）。
 -->
-<div class="shelf-item" class:shelf-item--missing={item.missing} title={item.sourcePath}>
-  <button
-    type="button"
-    class="shelf-item__body"
-    onmousedown={onDragOut}
-    disabled={item.missing}
-  >
-    <span class="shelf-item__name">{item.displayName}</span>
-    <span class="shelf-item__meta">
-      {kindLabel}
-      {#if item.missing}
-        <span class="shelf-item__warning">見つかりません</span>
-      {/if}
-    </span>
-  </button>
-  <button type="button" class="shelf-item__remove" onclick={onRemove} aria-label="削除">×</button>
+<div class="shelf-item-wrapper">
+  <div class="shelf-item" class:shelf-item--missing={item.missing} title={item.sourcePath}>
+    <button
+      type="button"
+      class="shelf-item__body"
+      onmousedown={onDragOut}
+      disabled={item.missing}
+    >
+      <span class="shelf-item__name">{item.displayName}</span>
+      <span class="shelf-item__meta">
+        {kindLabel}
+        {#if item.missing}
+          <span class="shelf-item__warning">見つかりません</span>
+        {/if}
+      </span>
+    </button>
+    <button
+      type="button"
+      class="shelf-item__lock"
+      class:shelf-item__lock--active={item.locked}
+      onclick={onToggleLock}
+      aria-label={item.locked ? "ロックを解除" : "ロックする"}
+      title={item.locked ? "ロック中（全て削除の対象外）" : "ロックする"}
+    >
+      {item.locked ? "🔒" : "🔓"}
+    </button>
+    <button type="button" class="shelf-item__remove" onclick={onRemove} aria-label="削除">×</button>
+  </div>
+
+  <div class="shelf-item__preview-popover">
+    <ShelfItemPreview {item} />
+  </div>
 </div>
 
 <style>
+  .shelf-item-wrapper {
+    position: relative;
+  }
+
   .shelf-item {
     display: flex;
     align-items: center;
@@ -90,6 +115,7 @@
     color: #ff9d9d;
   }
 
+  .shelf-item__lock,
   .shelf-item__remove {
     flex-shrink: 0;
     background: none;
@@ -102,7 +128,32 @@
     padding: 0.2rem 0.4rem;
   }
 
+  .shelf-item__lock--active {
+    opacity: 1;
+  }
+
+  .shelf-item__lock:hover,
   .shelf-item__remove:hover {
     opacity: 1;
+  }
+
+  /*
+    F-07: ホバーで表示するプレビューポップオーバー（CSSのみで開閉、JS側で状態管理しない）。
+    シェルフウィンドウ自体が画面端に固定された狭い縦長ウィンドウ（既定幅300px）のため、
+    項目の左右にポップオーバーを出すとウィンドウ枠の外にはみ出してクリップされてしまう。
+    そのため項目の直下に、ウィンドウ幅に収まる形で展開する設計にした（迷った設計判断）。
+  */
+  .shelf-item__preview-popover {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    margin-top: 0.25rem;
+    z-index: 10;
+  }
+
+  .shelf-item-wrapper:hover .shelf-item__preview-popover {
+    display: block;
   }
 </style>

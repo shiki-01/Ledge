@@ -22,7 +22,12 @@ export function shelfRemoveItem(id: number): Promise<void> {
   return invoke<void>("shelf_remove_item", { id });
 }
 
-/** 一括削除（F-06実装後はロック対象を除外する） */
+/** ロック状態の変更（F-06。ロック中は「全て削除」の対象から除外される） */
+export function shelfSetLocked(id: number, locked: boolean): Promise<void> {
+  return invoke<void>("shelf_set_locked", { id, locked });
+}
+
+/** 一括削除（ロック対象を除外するかどうか。F-06実装後はデフォルトでtrueを渡す） */
 export function shelfClear(excludeLocked: boolean): Promise<void> {
   return invoke<void>("shelf_clear", { excludeLocked });
 }

@@ -17,4 +17,6 @@ export interface ShelfItem {
   addedAt: string;
   /** 元ファイル/フォルダが現在参照可能かどうか（一覧取得のたびにRust側で算出される） */
   missing: boolean;
+  /** 元ファイルの最終更新日時（Unixエポックミリ秒）。取得できない場合はnull（F-07プレビュー用） */
+  modifiedAtMs: number | null;
 }

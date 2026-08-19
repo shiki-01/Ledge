@@ -2,7 +2,13 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import ShelfItem from "./ShelfItem.svelte";
   import { shelfStore } from "../stores/shelfStore";
-  import { shelfAddPaths, shelfBeginDragOut, shelfClear, shelfRemoveItem } from "../api/commands";
+  import {
+    shelfAddPaths,
+    shelfBeginDragOut,
+    shelfClear,
+    shelfRemoveItem,
+    shelfSetLocked,
+  } from "../api/commands";
   import { isShelfErrorPayload } from "../types/error";
 
   let isDraggingOver = $state(false);
@@ -67,8 +73,8 @@
 
   async function handleClearAll(): Promise<void> {
     try {
-      // F-06（ロック除外）はPhase3実装のため、Phase1では常に全件削除相当になる
-      await shelfClear(false);
+      // ロック済みアイテム（F-06）は一括削除の対象から除外する
+      await shelfClear(true);
     } catch (e) {
       showError(e);
     }
@@ -77,6 +83,14 @@
   async function handleDragOut(id: number): Promise<void> {
     try {
       await shelfBeginDragOut([id]);
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  async function handleToggleLock(id: number, locked: boolean): Promise<void> {
+    try {
+      await shelfSetLocked(id, !locked);
     } catch (e) {
       showError(e);
     }
@@ -103,7 +117,12 @@
   <ul class="shelf__list">
     {#each $shelfStore as item (item.id)}
       <li>
-        <ShelfItem {item} onRemove={() => handleRemove(item.id)} onDragOut={() => handleDragOut(item.id)} />
+        <ShelfItem
+          {item}
+          onRemove={() => handleRemove(item.id)}
+          onDragOut={() => handleDragOut(item.id)}
+          onToggleLock={() => handleToggleLock(item.id, item.locked)}
+        />
       </li>
     {/each}
   </ul>
