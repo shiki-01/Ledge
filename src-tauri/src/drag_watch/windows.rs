@@ -22,15 +22,39 @@
 //! ユーザー報告があった。対策として、設定済みのシェルフ表示端（`AppSettings.shelf_edge`）に近い
 //! エリアに入った時だけ発火するよう変更した（`EdgeGeometry`, `in_edge_zone`）。ジオメトリの取得に
 //! 失敗した場合（`edge: None`）は、安全側に倒し従来通り無条件で発火する。
+//!
+//! ## タイトルバードラッグ（ウィンドウ移動）の除外について
+//! エッジ近傍判定を追加した後も、「ウィンドウを画面端に持っていくとまだシェルフが出る」という
+//! ユーザー報告があった。これはウィンドウのタイトルバーを掴んでエッジ付近までドラッグ移動する
+//! 操作が、上記のエッジ近傍判定を素通りしてしまうために起きる。macOS版では
+//! `NSPasteboard(name: .drag)`を使い「本当にコンテンツをドラッグしているか」を直接判定できるが、
+//! Windowsには同等のグローバルなドラッグ内容参照手段が無いため、代わりに「左ボタン押下位置が
+//! ウィンドウのタイトルバー（キャプション領域）だったら、ウィンドウ移動の開始とみなして除外する」
+//! というヒューリスティックを追加した（`is_title_bar_hit`、`WM_NCHITTEST`/`HTCAPTION`を使用）。
+//!
+//! `WM_NCHITTEST`の判定に使う`SendMessageW`は対象ウィンドウのメッセージループへ同期送信し
+//! 応答を待つブロッキング呼び出しであり、対象アプリの応答が遅い場合に時間がかかりうる。そのため
+//! `handle_event`/`hook_proc`（`WH_MOUSE_LL`フックプロシージャの呼び出し系列）の中では絶対に
+//! 呼び出さず、`invoke_on_start`（メッセージループスレッドの通常のディスパッチ処理内、フック
+//! プロシージャの外）からのみ呼び出す設計とした（本ファイル内の「低レベルフックタイムアウト」に
+//! 関する既存の注意書きを参照）。
+//!
+//! 実機（Windows）での動作確認は未実施であることに加え、このmacOS開発環境ではこのファイルは
+//! そもそもコンパイル対象外（`#[cfg(target_os = "windows")]`）であり、`cargo build`/`cargo check`
+//! による検証も一切できていない。型・API名の妥当性はvendoringされた`windows`クレート0.61.3の
+//! ソース（`~/.cargo/registry/src/.../windows-0.61.3/src/Windows/Win32/UI/WindowsAndMessaging/
+//! mod.rs`および`Foundation/mod.rs`）を直接読んで照合したが、実行時の挙動検証はできていない
+//! （呼び出し元への報告事項）。
 
 use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HHOOK, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
+    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SendMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, HHOOK, HTCAPTION,
+    MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST,
+    WM_QUIT,
 };
 
 use crate::error::ShelfError;
@@ -290,11 +314,48 @@ fn margin_physical_px(scale_factor: f64) -> f64 {
     EDGE_ZONE_MARGIN_LOGICAL_PX * scale_factor
 }
 
-fn invoke_on_start() {
-    if let Some(state) = HOOK_STATE.get() {
-        let guard = state.lock().unwrap_or_else(|p| p.into_inner());
-        (guard.on_start)();
+/// 指定した画面座標（マウス押下位置）がウィンドウのタイトルバー（キャプション領域）かどうかを
+/// `WM_NCHITTEST`で判定する。ウィンドウのドラッグ移動はほぼ必ずタイトルバーの掴みから始まるため、
+/// これを弾くことでウィンドウ移動による誤発火を減らす（ユーザー報告「ウィンドウを画面端に持って
+/// いくとまだシェルフが出る」への対策、macOS版の`NSPasteboard(name: .drag)`判定に相当する
+/// Windows版の代替策。ファイル冒頭「タイトルバードラッグの除外について」参照）。
+///
+/// **重要**: この関数は`SendMessageW`という同期・ブロッキング呼び出しを含むため、
+/// `handle_event`/`hook_proc`（`WH_MOUSE_LL`フックプロシージャの呼び出し系列）の中では
+/// 絶対に呼び出してはならない（ファイル冒頭コメント「低レベルフックタイムアウト」参照）。
+/// 呼び出しは`invoke_on_start`（メッセージループスレッドの通常のディスパッチ処理内、
+/// フックプロシージャの外）からのみ行うこと。
+fn is_title_bar_hit(pt: POINT) -> bool {
+    unsafe {
+        let hwnd = WindowFromPoint(pt);
+        if hwnd.is_invalid() {
+            return false;
+        }
+        // WM_NCHITTESTのlParamは、x/yそれぞれ16bit値としてパックしたスクリーン座標
+        // （Win32の伝統的なMAKELPARAMマクロと同じ形）。
+        let lparam = LPARAM((((pt.y as u32) << 16) | (pt.x as u32 & 0xFFFF)) as isize);
+        let result: LRESULT = SendMessageW(hwnd, WM_NCHITTEST, Some(WPARAM(0)), Some(lparam));
+        result.0 == HTCAPTION as isize
     }
+}
+
+fn invoke_on_start() {
+    let Some(state) = HOOK_STATE.get() else {
+        return;
+    };
+    let down_pos = {
+        let guard = state.lock().unwrap_or_else(|p| p.into_inner());
+        guard.down_pos
+    };
+    // SendMessageW（ブロッキング呼び出し）はロックを保持したまま行わない。
+    if let Some(pos) = down_pos {
+        if is_title_bar_hit(pos) {
+            // ウィンドウ移動（タイトルバードラッグ）とみなし、on_startを呼ばない。
+            return;
+        }
+    }
+    let guard = state.lock().unwrap_or_else(|p| p.into_inner());
+    (guard.on_start)();
 }
 
 fn invoke_on_end() {
