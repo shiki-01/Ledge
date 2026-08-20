@@ -151,9 +151,10 @@ unsafe fn read_file_paths(pasteboard: &NSPasteboard) -> Option<Vec<std::path::Pa
     // 変換コードが増えるため、Phase2の簡略化としてこちらを採用した（迷った設計判断）。
     let ty = NSString::from_str("NSFilenamesPboardType");
     let plist = pasteboard.propertyListForType(&ty)?;
-    let array: objc2::rc::Retained<NSArray<NSString>> = plist.downcast().ok()?;
+    let array: objc2::rc::Retained<NSArray> = plist.downcast().ok()?;
     let paths = array
         .iter()
+        .filter_map(|obj| obj.downcast::<NSString>().ok())
         .map(|ns_str| std::path::PathBuf::from(ns_str.to_string()))
         .collect::<Vec<_>>();
     if paths.is_empty() {
