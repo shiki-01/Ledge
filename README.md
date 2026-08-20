@@ -68,10 +68,12 @@ Phase 1〜4に加えて以下の機能を実装済み。
 
 シェルフ・クリップボード履歴・設定は1つのウィンドウ内でタブ切り替えする形にしている
 （別ウィンドウ化はPhase3で再検討したが、既存のタブ切り替え方式との一貫性を優先した）。
-このLinux開発コンテナではWindows/macOS固有コード（`drag_drop/native.rs`、
-`clipboard/windows.rs`、`clipboard/macos.rs`、`drag_watch/windows.rs`、`drag_watch/macos.rs`）は
-コンパイル対象外のため、静的レビューに留めている（`docs/architecture.md` 7章参照）。特に
-`drag_watch/windows.rs`・`drag_watch/macos.rs`は実機での動作確認が未実施。
+開発環境のOSによってはWindows/macOS固有コード（`drag_drop/native.rs`、`clipboard/windows.rs`、
+`clipboard/macos.rs`、`drag_watch/windows.rs`、`drag_watch/macos.rs`）がコンパイル対象外になる
+（`#[cfg(target_os = "...")]`）。macOSホスト上の開発環境では`cargo build`でmacOS向けコードの
+コンパイル・型検証まで行えた回があるが（実在のビルドエラーを何件か検出・修正済み）、Windows向け
+コードはこの形での検証ができておらず静的レビューに留めている（`docs/architecture.md` 7章参照）。
+いずれのOS向けコードも、実際のユーザー操作を伴う動作確認はユーザー自身の実機でのテストによる。
 
 実装フェーズの進捗は [CLAUDE.md](CLAUDE.md) のチェックリストで管理する。
 

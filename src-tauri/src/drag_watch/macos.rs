@@ -32,13 +32,15 @@
 //! 行われることを型レベルで保証している。
 //!
 //! ## この実装の検証状況
-//! `#[cfg(target_os = "macos")]`配下のためこのLinux開発コンテナではコンパイル対象外であり、
-//! **実機（macOS）でのビルド・動作確認は未実施**。ただし`objc2`/`objc2-app-kit`/`block2`/
-//! `dispatch2`各クレートの実ソース（`static.crates.io`から`Cargo.lock`記載バージョンを直接取得し
-//! 展開したもの）を参照し、ここで使用しているメソッドシグネチャ（`addGlobalMonitorForEventsMatchingMask_handler`
-//! `removeMonitor`, `NSEvent::r#type`, `NSEvent::locationInWindow`, `dispatch2::run_on_main`,
-//! `dispatch2::MainThreadBound`等）が実際に存在し型が一致することは確認済み。とはいえ実機ビルドでの
-//! 最終確認は必要（windows.rsと同じ扱い、architecture.md 7章）。
+//! `#[cfg(target_os = "macos")]`配下のためWindows/Linux等の開発環境ではコンパイル対象外だが、
+//! 実際にmacOSホスト上の開発環境で`cargo build`/`cargo test --lib`によるコンパイル・型検証を
+//! 行った回があり（このファイルへのエッジ近傍判定・ドラッグ用パスボード判定の追加も含めて
+//! 検証済み）、型・API名レベルの妥当性は確認できている。ユーザー環境での実際の動作確認
+//! （Accessibility権限の許可フロー、実際のマウス操作でのドラッグ検知精度、ウィンドウ移動時に
+//! ドラッグ用パスボードの`changeCount`が本当に変化しないか等）はユーザー自身による対話的な
+//! テストでのみ確認できており、Finder以外のサードパーティアプリを含めた網羅的な検証は
+//! まだ済んでいない（windows.rsとは異なり少なくともコンパイルは実機で通っている、という点で
+//! 検証状況が異なることに注意。architecture.md 7章）。
 //!
 //! ## エッジ近傍判定の追加について（座標変換、実機未検証のリスクが最も高い箇所）
 //! Windows版と同じ理由（画面上のどこでクリック&ドラッグしても反応してしまい邪魔、という
@@ -74,7 +76,9 @@ use dispatch2::{run_on_main, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSPasteboard, NSPasteboardNameDrag, NSScreen};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSEventType, NSPasteboard, NSPasteboardNameDrag, NSScreen,
+};
 use objc2_foundation::NSPoint;
 
 use crate::error::ShelfError;
@@ -151,7 +155,9 @@ impl DragWatcher for MacDragWatcher {
         let registered = run_on_main(move |mtm| register_monitor(mtm, state));
 
         let monitor = registered.ok_or_else(|| {
-            ShelfError::Internal("ドラッグ監視用グローバルイベントモニタの登録に失敗しました".into())
+            ShelfError::Internal(
+                "ドラッグ監視用グローバルイベントモニタの登録に失敗しました".into(),
+            )
         })?;
         self.monitor = Some(monitor);
         Ok(())
@@ -174,7 +180,8 @@ fn register_monitor(
     mtm: MainThreadMarker,
     state: Arc<Mutex<WatcherState>>,
 ) -> Option<MainThreadBound<Retained<AnyObject>>> {
-    let mask = NSEventMask::LeftMouseDown | NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp;
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp;
 
     let block = RcBlock::new(move |event: NonNull<NSEvent>| {
         // SAFETY: AppKitがハンドラ呼び出し時に渡す`NSEvent`は常に有効なポインタである。
@@ -199,10 +206,12 @@ fn register_monitor(
 /// 呼び出し元がメインスレッドであることは既に保証されているためこちらを選んだ。
 /// 呼び出し元への報告事項: 迷った設計判断）。
 fn handle_event(state: &Mutex<WatcherState>, event: &NSEvent) {
-    let event_type = unsafe { event.r#type() };
-    let loc = unsafe { event.locationInWindow() };
+    let event_type = event.r#type();
+    let loc = event.locationInWindow();
 
-    let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if event_type == NSEventType::LeftMouseDown {
         guard.down_pos = Some(loc);
@@ -285,10 +294,16 @@ fn in_edge_zone(pt: NSPoint, edge: &EdgeGeometry) -> bool {
     let max_y = min_y + edge.work_area_height as f64 / edge.scale_factor;
     let margin = EDGE_ZONE_MARGIN_POINTS;
     match edge.edge {
-        ShelfEdge::Left => pt.x >= min_x && pt.x <= min_x + margin && pt.y >= min_y && pt.y <= max_y,
-        ShelfEdge::Right => pt.x <= max_x && pt.x >= max_x - margin && pt.y >= min_y && pt.y <= max_y,
+        ShelfEdge::Left => {
+            pt.x >= min_x && pt.x <= min_x + margin && pt.y >= min_y && pt.y <= max_y
+        }
+        ShelfEdge::Right => {
+            pt.x <= max_x && pt.x >= max_x - margin && pt.y >= min_y && pt.y <= max_y
+        }
         ShelfEdge::Top => pt.y >= min_y && pt.y <= min_y + margin && pt.x >= min_x && pt.x <= max_x,
-        ShelfEdge::Bottom => pt.y <= max_y && pt.y >= max_y - margin && pt.x >= min_x && pt.x <= max_x,
+        ShelfEdge::Bottom => {
+            pt.y <= max_y && pt.y >= max_y - margin && pt.x >= min_x && pt.x <= max_x
+        }
     }
 }
 

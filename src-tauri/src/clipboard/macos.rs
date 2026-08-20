@@ -5,10 +5,13 @@
 //! メインウィンドウ（シェルフ/履歴パネル、Phase2ではタブ切り替えの単一ウィンドウ）が
 //! 非表示中は800〜1000msへ緩和する（`set_panel_visible`で`window.rs`から通知される）。
 //!
-//! `#[cfg(target_os = "macos")]`配下のためこのLinux開発コンテナではコンパイル対象外であり、
-//! 実機（macOS）での静的レビュー・実装意図の確認にとどまる（architecture.md 7章）。
+//! `#[cfg(target_os = "macos")]`配下のためWindows/Linux等の開発環境ではコンパイル対象外だが、
+//! 実際にmacOSホスト上の開発環境で`cargo build`によるコンパイル検証を行った回があり
+//! （`NSArray<NSString>`への直接downcastが失敗する実在のビルドエラーを検出・修正済み）、
+//! 型・API名レベルの妥当性は確認できている。ただし実際の動作（クリップボード変更の検知精度、
+//! ポーリング間隔調整等）はまだ実機での対話的な確認ができていない（architecture.md 7章）。
 //! `NSPasteboard.general`をメインスレッド以外から呼び出せるかはobjc2-app-kitのバージョンに
-//! よってMainThreadMarker要求の有無が変わりうるため、実機ビルド時の確認が必要。
+//! よってMainThreadMarker要求の有無が変わりうるため、引き続き実機での確認が必要。
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -72,7 +75,11 @@ impl ClipboardWatcher for MacClipboardWatcher {
         let join_handle = std::thread::Builder::new()
             .name("clipboard-watcher-mac".into())
             .spawn(move || poll_loop(running, on_change))
-            .map_err(|e| ShelfError::Internal(format!("クリップボード監視スレッドの起動に失敗しました: {e}")))?;
+            .map_err(|e| {
+                ShelfError::Internal(format!(
+                    "クリップボード監視スレッドの起動に失敗しました: {e}"
+                ))
+            })?;
 
         self.join_handle = Some(join_handle);
         Ok(())
@@ -174,8 +181,11 @@ unsafe fn read_image_as_png(pasteboard: &NSPasteboard) -> Option<Vec<u8>> {
     let tiff_type = NSString::from_str("public.tiff");
     let data = pasteboard.dataForType(&tiff_type)?;
     let tiff_bytes = data.to_vec();
-    let decoded = image::load_from_memory_with_format(&tiff_bytes, image::ImageFormat::Tiff).ok()?;
+    let decoded =
+        image::load_from_memory_with_format(&tiff_bytes, image::ImageFormat::Tiff).ok()?;
     let mut png_bytes = std::io::Cursor::new(Vec::new());
-    decoded.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
+    decoded
+        .write_to(&mut png_bytes, image::ImageFormat::Png)
+        .ok()?;
     Some(png_bytes.into_inner())
 }

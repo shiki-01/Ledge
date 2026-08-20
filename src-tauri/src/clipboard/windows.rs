@@ -3,8 +3,9 @@
 //! `AddClipboardFormatListener`によるイベント駆動: メッセージ専用ウィンドウ（`HWND_MESSAGE`）を
 //! 1つ作成し、専用スレッドのメッセージループで`WM_CLIPBOARDUPDATE`を受信する。
 //!
-//! `#[cfg(target_os = "windows")]`配下のためこのLinux開発コンテナではコンパイル対象外であり、
-//! 実機（Windows）での静的レビュー・実装意図の確認にとどまる（architecture.md 7章）。
+//! `#[cfg(target_os = "windows")]`配下のためWindows以外の開発環境（macOS/Linux等）では
+//! コンパイル対象外であり、実機（Windows）での静的レビュー・実装意図の確認にとどまる
+//! （architecture.md 7章）。
 //! windows-rsのモジュールパス（特にCF_*定数の所属モジュール）はcrateのバージョンにより
 //! 変わることがあるため、実機ビルド時に`cargo check`で調整が必要になる可能性がある。
 
@@ -66,12 +67,16 @@ impl ClipboardWatcher for WindowsClipboardWatcher {
         let join_handle = std::thread::Builder::new()
             .name("clipboard-watcher-win".into())
             .spawn(move || run_message_loop(on_change, tx))
-            .map_err(|e| ShelfError::Internal(format!("クリップボード監視スレッドの起動に失敗しました: {e}")))?;
+            .map_err(|e| {
+                ShelfError::Internal(format!(
+                    "クリップボード監視スレッドの起動に失敗しました: {e}"
+                ))
+            })?;
 
         // ウィンドウ作成が完了し、スレッドIDが送られてくるまで待つ（stop()でのPostThreadMessage用）
-        let thread_id = rx
-            .recv()
-            .map_err(|_| ShelfError::Internal("クリップボード監視スレッドの初期化に失敗しました".into()))?;
+        let thread_id = rx.recv().map_err(|_| {
+            ShelfError::Internal("クリップボード監視スレッドの初期化に失敗しました".into())
+        })?;
 
         self.thread_id = Some(thread_id);
         self.join_handle = Some(join_handle);
@@ -91,7 +96,10 @@ impl ClipboardWatcher for WindowsClipboardWatcher {
 }
 
 /// 監視専用スレッドで実行するメッセージループ本体。
-fn run_message_loop(on_change: Arc<Box<dyn Fn(ClipboardSnapshot) + Send + Sync>>, tx: mpsc::Sender<u32>) {
+fn run_message_loop(
+    on_change: Arc<Box<dyn Fn(ClipboardSnapshot) + Send + Sync>>,
+    tx: mpsc::Sender<u32>,
+) {
     unsafe {
         let class_name = to_wide("ShelfDropClipboardWatcher");
         let instance = GetModuleHandleW(None).unwrap_or_default();
@@ -158,7 +166,9 @@ fn run_message_loop(on_change: Arc<Box<dyn Fn(ClipboardSnapshot) + Send + Sync>>
         let _ = RemoveClipboardFormatListener(hwnd);
         let _ = DestroyWindow(hwnd);
         // Arcの所有権を取り戻してdropする（into_rawで手放した分を回収）
-        drop(Arc::from_raw(on_change_ptr as *const Box<dyn Fn(ClipboardSnapshot) + Send + Sync>));
+        drop(Arc::from_raw(
+            on_change_ptr as *const Box<dyn Fn(ClipboardSnapshot) + Send + Sync>,
+        ));
     }
 }
 
@@ -193,7 +203,8 @@ fn handle_clipboard_update(on_change_ptr: &isize) {
         let _ = CloseClipboard();
 
         if let Some(snapshot) = snapshot {
-            let callback = &*(*on_change_ptr as *const Box<dyn Fn(ClipboardSnapshot) + Send + Sync>);
+            let callback =
+                &*(*on_change_ptr as *const Box<dyn Fn(ClipboardSnapshot) + Send + Sync>);
             callback(snapshot);
         }
     }
@@ -288,7 +299,11 @@ unsafe fn read_image_as_png() -> Option<ClipboardSnapshot> {
             let b = bytes[src];
             let g = bytes[src + 1];
             let r = bytes[src + 2];
-            let a = if bytes_per_pixel == 4 { bytes[src + 3] } else { 255 };
+            let a = if bytes_per_pixel == 4 {
+                bytes[src + 3]
+            } else {
+                255
+            };
             let dst = (y * width as usize + x) * 4;
             rgba[dst] = r;
             rgba[dst + 1] = g;

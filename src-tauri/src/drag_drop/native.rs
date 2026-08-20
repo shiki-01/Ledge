@@ -8,8 +8,11 @@
 //! （呼び出し元への報告事項: 迷った設計判断）。将来フロントエンドから直接ドラッグを
 //! 開始したくなった場合は、lib.rsで登録済みの`tauri_plugin_drag::init()`経由のIPCも使える。
 //!
-//! `#[cfg(any(target_os = "windows", target_os = "macos"))]`でのみコンパイルされるため、
-//! このLinux開発コンテナでは静的なコンパイル検証ができていない（architecture.md 7章）。
+//! `#[cfg(any(target_os = "windows", target_os = "macos"))]`でのみコンパイルされる。
+//! macOSホスト上の開発環境では`cargo build`によるコンパイル検証ができた回がある
+//! （ドラッグプレビュー画像が`bundle.resources`未登録で実行時に見つからず`drag`クレート側で
+//! `ImageNotFound`になる不具合を実機で検出・修正済み）。Windows向けの経路はこの形での
+//! 検証ができておらず、静的レビューにとどまる（architecture.md 7章）。
 
 use std::path::PathBuf;
 
@@ -36,7 +39,9 @@ impl DragOutSource for NativeDragOutSource {
         let window = self
             .app_handle
             .get_webview_window(MAIN_WINDOW_LABEL)
-            .ok_or_else(|| ShelfError::DragDropFailed("シェルフウィンドウが見つかりません".into()))?;
+            .ok_or_else(|| {
+                ShelfError::DragDropFailed("シェルフウィンドウが見つかりません".into())
+            })?;
 
         // ドラッグプレビュー画像は当面アプリアイコンを流用する（専用サムネイル生成はPhase1では行わない）
         let icon_path = self

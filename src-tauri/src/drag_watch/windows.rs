@@ -7,9 +7,11 @@
 //! でも反応しうる。誤検知の実害は小さい（シェルフが表示されるだけ）という判断のもと許容する
 //! （architecture.md 8.1章）。
 //!
-//! `#[cfg(target_os = "windows")]`配下のためこのLinux開発コンテナではコンパイル対象外であり、
-//! **実機（Windows）での動作確認は未実施**。構文的な妥当性とロジックの妥当性のレビューに留まる
-//! （architecture.md 7章）。
+//! `#[cfg(target_os = "windows")]`配下のためWindows以外の開発環境（macOS/Linux等）では
+//! コンパイル対象外であり、**実機（Windows）での動作確認は未実施**。構文的な妥当性と
+//! ロジックの妥当性のレビューに留まる（architecture.md 7章）。開発環境がmacOSだった回では
+//! `windows`クレート自体がターゲット限定依存のためフェッチされず、`cargo build`でこの
+//! ファイルを検証することもできなかった。
 //!
 //! 簡略化した点（呼び出し元への報告事項）: architecture.md 8.1章は「一定時間（既定800ms）操作が
 //! 無ければ自動的に表示状態を解除して**良い**」と許容的に書いており必須要件ではないため、
@@ -136,11 +138,13 @@ impl DragWatcher for WindowsDragWatcher {
         let join_handle = std::thread::Builder::new()
             .name("drag-watch-win".into())
             .spawn(move || run_message_loop(tx))
-            .map_err(|e| ShelfError::Internal(format!("ドラッグ監視スレッドの起動に失敗しました: {e}")))?;
+            .map_err(|e| {
+                ShelfError::Internal(format!("ドラッグ監視スレッドの起動に失敗しました: {e}"))
+            })?;
 
-        let thread_id = rx
-            .recv()
-            .map_err(|_| ShelfError::Internal("ドラッグ監視スレッドの初期化に失敗しました".into()))?;
+        let thread_id = rx.recv().map_err(|_| {
+            ShelfError::Internal("ドラッグ監視スレッドの初期化に失敗しました".into())
+        })?;
         if thread_id == 0 {
             return Err(ShelfError::Internal(
                 "低レベルマウスフックの登録に失敗しました".into(),

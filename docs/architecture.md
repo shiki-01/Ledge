@@ -225,7 +225,7 @@ pub trait DragOutSource: Send {
 
 ## 7. 開発時のビルド検証について
 
-このリポジトリの開発コンテナ（Linux/Ubuntu）にはWindows/macOS向けのクロスコンパイル環境が無いため、`#[cfg(target_os = "windows")]`/`#[cfg(target_os = "macos")]`配下のコードはこの環境ではコンパイルされない。`dev_stub`実装により`cargo check --target x86_64-unknown-linux-gnu`（デフォルトターゲット）で共通部分（storage/commands/settings/tray等）の型検査とロジックのテストは可能にしておく。Windows/macOS固有コード自体の動作確認は実機（またはCI上のクロスプラットフォームランナー）が必要であり、本セッションでは静的なレビューとロジックの妥当性検証に留める。
+開発作業を行う環境のOSは回によって異なりうる（Linux/Ubuntuのこともあれば、macOSホストのこともある）。いずれの場合も、開発環境自身のOSに対応する`#[cfg(target_os = "...")]`配下のコードだけがその場でコンパイルされ、それ以外のOS向けコードはコンパイル対象外になる。`dev_stub`実装により、開発環境のデフォルトターゲットで共通部分（storage/commands/settings/tray等）の型検査とロジックのテストは常に可能にしておく。macOSホスト上の開発環境ではmacOS向けコード（`clipboard/macos.rs`, `drag_watch/macos.rs`, `drag_drop/native.rs`等）の実際のコンパイル・型検証まで行えた回があり、その過程で実在のビルドエラーを複数検出・修正できている。一方Windows向けコードは、Windows以外の開発環境では`windows`クレート自体がターゲット限定依存のためフェッチもされず、静的なレビューとロジックの妥当性検証に留まる。いずれのOS向けコードも、コンパイルが通ることと実際のユーザー操作を伴う動作確認は別問題であり、後者はユーザー自身の実機でのテストが必要になる。
 
 ---
 
