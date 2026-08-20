@@ -15,6 +15,7 @@ Ledge: Windows / macOS 両対応のファイル一時置き場（シェルフ）
 - **グローバルホットキー**: tauri-plugin-global-shortcut
 - **Windows/macOS アウトバウンドD&D**: `drag`クレート（tauri-plugin-dragが内部で使うものと同一。Windows=COM/IDropTarget、macOS=NSPasteboard/NSDraggingSessionを内部で利用）。採用理由は`docs/architecture.md` 4.2章参照
 - **設定永続化**: tauri-plugin-store（`settings.json`）
+- **デバイス間同期（F-22）**: Firebase Web SDK（Firestore + Authentication、Bring Your Own Firebase方式）。詳細は`docs/architecture.md` 10.2章参照
 
 実際のディレクトリ構成・SQLiteスキーマ・Tauriコマンド一覧・OS抽象化traitの詳細設計は [docs/architecture.md](docs/architecture.md) を参照（実装済みコードのSSoTはコードそのものだが、設計意図はこちらに集約する）。
 
@@ -28,7 +29,7 @@ Ledge: Windows / macOS 両対応のファイル一時置き場（シェルフ）
 - [x] Phase 2: クリップボード履歴 + ピン留め（F-11〜F-13, F-16）
 - [x] Phase 3: Windows側自動検出、表示設定、自動起動（F-08(Win), F-06, F-07, F-10, F-19）
 - [x] Phase 4: 検索・タグ・スタック（F-14, F-15, F-17）
-- [ ] Phase 5: macOS側自動検出、同期検討（F-08(Mac)実装済み・未検証／F-22はユーザー判断待ちのため未着手）
+- [x] Phase 5: macOS側自動検出（F-08(Mac)実装済み・実機未検証）、デバイス間同期（F-22, Bring Your Own Firebase方式で実装済み）
 - [x] Phase 6: よく使うフォルダ登録 + シェルフアイテムの右クリックメニュー（F-09, F-21）
 
 各フェーズはrequirements.mdの機能IDに対応させ、実装完了時にチェックを更新する。

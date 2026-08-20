@@ -187,7 +187,7 @@ Windows向けクリップボードマネージャー「Edge Drop」（edgedrop.a
 | D-1 | 正式なアプリ名・アイコン | **決定済み**。アプリ名は「Ledge」。アイコンはユーザー本人が別途用意するまでの仮アイコンを`src-tauri/icons/`に配置済み | ― |
 | D-2 | Bundle ID / Application ID | **決定済み**。`com.shiki-01.ledge` | ― |
 | D-3 | OSSライセンス | **決定済み**。MIT（`LICENSE`ファイル済み） | ― |
-| D-4 | コード署名（Windows Authenticode / Apple Developer ID + notarization） | **保留**（署名なしの開発ビルドのまま） | 証明書・Apple Developer Programアカウント等、ユーザー本人の契約・鍵が必要なため実装だけでは進められない |
+| D-4 | コード署名（Windows Authenticode / Apple Developer ID + notarization） | **決定済み**。費用をかけない方針のため署名なしで配布する。Windows SmartScreen・macOS Gatekeeperの警告は、配布時にREADME等へバイパス手順（Windows: 「詳細情報」→「実行」、macOS: 右クリックで「開く」）を明記して案内する | ― |
 | D-5 | 既定のグローバルホットキー | シェルフ: `Ctrl+Alt+S` / `Cmd+Option+S`、履歴: `Ctrl+Alt+V` / `Cmd+Option+V` を仮置き | 他アプリとの競合はユーザーの利用環境依存。F-20で変更可能な設計とする |
 | D-6 | OSS公開のタイミング・公開範囲 | **決定済み**。当面は個人開発として進行し、公開タイミングは改めて判断する | ― |
 | D-7 | F-22（デバイス間同期）の方式 | **決定済み**。各ユーザーが自分のFirebaseプロジェクト（Sparkプラン=無料枠）を用意し、アプリ設定にFirebase構成とログイン情報を入力するBring Your Own方式を採用。開発者側の運営コストはゼロ、ユーザー側も無料枠内で完結する。詳細設計は`architecture.md` 10.2章 | ― |

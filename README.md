@@ -25,12 +25,13 @@ Windows向けクリップボードマネージャー「Edge Drop」、Mac向け�
 | グローバルホットキー | tauri-plugin-global-shortcut |
 | Windows D&D | `drag`クレート（tauri-plugin-dragが内部で使用するものと同一。COM/IDropTargetベース） |
 | macOS D&D | `drag`クレート（NSPasteboard/NSDraggingSessionベース） |
+| デバイス間同期 | Firebase Web SDK（Firestore + Authentication、Bring Your Own Firebase方式） |
 
 ## 現在の状態
 
-**2026-08-19時点、Phase 5のうち実装可能な範囲（F-08のmacOS側）まで完了。** F-22（デバイス間同期）は
-同期方式（自前サーバー/クラウドストレージ経由/エクスポート・インポートのみ、等）自体がユーザー本人の
-判断を要する事項のため未着手（`docs/requirements.md` D-7、`docs/architecture.md` 10.2章）。それ以外は
+**2026-08-19時点、Phase 5のうち実装可能な範囲、およびPhase 6まで完了。** F-22（デバイス間同期）は
+各ユーザーが自分のFirebaseプロジェクト（無料枠）を用意する「Bring Your Own Firebase」方式で実装済み
+（ピン留め済みテキストのみが同期対象。`docs/requirements.md` D-7、`docs/architecture.md` 10.2章）。
 Phase 1〜4に加えて以下の機能を実装済み。
 
 - F-01: グローバルホットキー（既定 `Ctrl+Alt+S` / `Cmd+Option+S`）でシェルフウィンドウの表示/非表示をトグル
@@ -59,6 +60,11 @@ Phase 1〜4に加えて以下の機能を実装済み。
 - F-15: 複数のテキストアイテムを選択して改行結合し、新規テキストエントリとして記録するスタック機能
   （元アイテムは削除しない。対象はtext種別のみ）
 - F-17: クリップボード履歴アイテムへのタグ付け（作成・削除・付け外し）とタグによる絞り込み表示
+- F-09: よく使うフォルダをシェルフ上部に常時表示登録し、ワンクリックで開く/ドラッグアウトできる
+  （`tauri-plugin-dialog`でフォルダ選択、`favorite_folders`テーブルで管理）
+- F-21: シェルフアイテムの右クリックメニュー（パスをコピー／圧縮してシェルフに追加／Explorerで表示・Finderで表示）
+- F-22: デバイス間同期（Bring Your Own Firebase方式）。ピン留め済みのテキストクリップボード履歴のみを
+  FirestoreへリアルタイムLast-Write-Winsで同期。未設定時はローカルSQLiteのみで完結する完全オプトイン機能
 
 シェルフ・クリップボード履歴・設定は1つのウィンドウ内でタブ切り替えする形にしている
 （別ウィンドウ化はPhase3で再検討したが、既存のタブ切り替え方式との一貫性を優先した）。
@@ -73,7 +79,8 @@ Phase 1〜4に加えて以下の機能を実装済み。
 - [x] Phase 2: クリップボード履歴 + ピン留め
 - [x] Phase 3: Windows側自動検出、表示設定、自動起動
 - [x] Phase 4: 検索・タグ・スタック
-- [ ] Phase 5: macOS側自動検出、同期検討（F-08(Mac)実装済み・未検証／F-22はユーザー判断待ちのため未着手）
+- [x] Phase 5: macOS側自動検出（F-08(Mac)実装済み・実機未検証）、デバイス間同期（F-22, Bring Your Own Firebase方式で実装済み）
+- [x] Phase 6: よく使うフォルダ登録 + シェルフアイテムの右クリックメニュー（F-09, F-21）
 
 ## 開発コマンド
 
