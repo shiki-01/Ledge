@@ -200,6 +200,7 @@ pub trait DragOutSource: Send {
 - **実装方針（技術選定の補足）**: `requirements.md` 5章は「windows-rs（COM/IDropTarget）」「NSPasteboard/NSDraggingSession」を明記しているが、これをフルスクラッチで実装するとCOMのIDropSource/IDataObject実装やNSDraggingSource準拠のObjective-C連携など、実装コストとバグ面のリスクが大きい。そこで**`tauri-plugin-drag`（crabnebula製）を第一候補として採用**する。内部的には同じOS APIを使っており、要件の技術選定と矛盾しない。trait越しに呼んでいるため、将来カスタムのドラッグプレビュー画像合成等が必要になれば`native.rs`の中身だけ差し替えれば良い
 - 受け入れ側（F-02のシェルフへのドロップ）はTauri v2の組み込みドラッグ&ドロップイベント（`dragDropEnabled` + `onDragDropEvent`）で完結し、独自のCOM/NSPasteboardコードは不要
 - **自己ドロップガード**: シェルフウィンドウ自体が`dragDropEnabled: true`でOSレベルのドロップ先としても登録されており、かつシェルフは画面端に薄くドッキングしているため、ドラッグアウト開始直後にカーソルがまだシェルフウィンドウの境界付近/内側にある間、OSが「送り出し中のドラッグ」を自分自身への「ドロップ候補」として検知することがある。対策として、`begin_drag`（`drag::start_drag`）の完了コールバックでネイティブドラッグの終了をTauriイベント`shelf://drag-out-ended`としてフロントへ通知し、フロント側（`Shelf.svelte`）は`shelfBeginDragOut`呼び出しから当該イベント受信までを`isDraggingOutSelf`フラグで管理して、その間の`onDragDropEvent`（enter/over/drop）を無視する。イベントが届かない場合の保険として30秒の安全タイマーも併設する
+- **ドラッグプレビュー画像の解決に`bundle.resources`が必要**: `native.rs`はドラッグ中のプレビュー画像を`app_handle.path().resolve("icons/icon.png", BaseDirectory::Resource)`で解決しているが、`tauri.conf.json`の`bundle.icon`（各プラットフォームのアプリアイコン生成専用、ビルド時にOS向けアイコン形式へ変換されるだけでランタイムから参照可能な場所へは配置されない）とは別に、`bundle.resources`にも`icons/icon.png`を明記しないと、`BaseDirectory::Resource`解決先にファイルが実在せず`drag`クレート側で`ImageNotFound`（「drag image not found」）エラーになる。実機（macOS）で発生を確認し、`resources: ["icons/icon.png"]`を追加して解消した（`cargo build`後に`target/debug/icons/icon.png`が生成されることを確認済み）
 
 ---
 
