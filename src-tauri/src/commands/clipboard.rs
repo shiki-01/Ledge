@@ -45,7 +45,11 @@ pub fn clipboard_stack_entries(
 /// requirements.md 5章）。書き込み直前にcontent hashを`SelfWriteGuard`へ`mark`しておくことで、
 /// 直後の監視イベントによる再記録（自己ループ）を防ぐ（requirements.md 10.2章）。
 #[tauri::command]
-pub fn clipboard_paste_to_active(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), ShelfError> {
+pub fn clipboard_paste_to_active(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), ShelfError> {
     let entry = {
         let conn = state.db.0.lock().map_err(lock_err)?;
         clipboard_repo::get_entry(&conn, id)?
@@ -64,8 +68,9 @@ pub fn clipboard_paste_to_active(app: AppHandle, state: State<'_, AppState>, id:
             let image_path = entry
                 .image_path
                 .ok_or_else(|| ShelfError::Internal("画像パスが記録されていません".into()))?;
-            let png_bytes = std::fs::read(&image_path)
-                .map_err(|e| ShelfError::Internal(format!("画像キャッシュの読み込みに失敗しました: {e}")))?;
+            let png_bytes = std::fs::read(&image_path).map_err(|e| {
+                ShelfError::Internal(format!("画像キャッシュの読み込みに失敗しました: {e}"))
+            })?;
 
             let hash = clipboard_repo::content_hash(&ClipboardSnapshot::Image(png_bytes.clone()));
             state.clipboard_guard.mark(hash);
@@ -150,7 +155,11 @@ pub fn clipboard_sync_unpin_by_hash(
 
 /// 個別削除。
 #[tauri::command]
-pub fn clipboard_delete(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), ShelfError> {
+pub fn clipboard_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), ShelfError> {
     {
         let conn = state.db.0.lock().map_err(lock_err)?;
         clipboard_repo::delete_entry(&conn, id)?;
@@ -197,7 +206,11 @@ pub(crate) fn handle_clipboard_change(app: &AppHandle, snapshot: ClipboardSnapsh
     let result = (|| -> Result<(), ShelfError> {
         let conn = state.db.0.lock().map_err(lock_err)?;
         clipboard_repo::record_entry(&conn, &state.clipboard_cache_dir, &snapshot, &hash)?;
-        clipboard_repo::enforce_retention(&conn, settings.clipboard_max_entries, settings.clipboard_retention_days)?;
+        clipboard_repo::enforce_retention(
+            &conn,
+            settings.clipboard_max_entries,
+            settings.clipboard_retention_days,
+        )?;
         Ok(())
     })();
 

@@ -17,18 +17,25 @@ const MENU_ID_QUIT: &str = "quit";
 
 /// トレイアイコンとメニューを構築する。
 pub fn setup_tray(app: &AppHandle) -> Result<(), ShelfError> {
-    let show_item = MenuItem::with_id(app, MENU_ID_SHOW_SHELF, "シェルフを表示", true, None::<&str>)
-        .map_err(tray_err)?;
+    let show_item = MenuItem::with_id(
+        app,
+        MENU_ID_SHOW_SHELF,
+        "シェルフを表示",
+        true,
+        None::<&str>,
+    )
+    .map_err(tray_err)?;
     let settings_item = MenuItem::with_id(app, MENU_ID_SETTINGS, "設定...", true, None::<&str>)
         .map_err(tray_err)?;
-    let quit_item = MenuItem::with_id(app, MENU_ID_QUIT, "終了", true, None::<&str>).map_err(tray_err)?;
+    let quit_item =
+        MenuItem::with_id(app, MENU_ID_QUIT, "終了", true, None::<&str>).map_err(tray_err)?;
 
-    let menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item]).map_err(tray_err)?;
+    let menu =
+        Menu::with_items(app, &[&show_item, &settings_item, &quit_item]).map_err(tray_err)?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| ShelfError::Internal("トレイアイコン用の既定アイコンが見つかりません".into()))?;
+    let icon = app.default_window_icon().cloned().ok_or_else(|| {
+        ShelfError::Internal("トレイアイコン用の既定アイコンが見つかりません".into())
+    })?;
 
     TrayIconBuilder::new()
         .icon(icon)

@@ -93,7 +93,10 @@ pub fn run() {
             // "**" のような包括スコープを敢えて置かず、実際に参照するパスだけを動的に許可する
             // 設計にしている）。
             {
-                let conn = db.0.lock().map_err(|_| ShelfError::Internal("内部ロックの取得に失敗しました".into()))?;
+                let conn = db
+                    .0
+                    .lock()
+                    .map_err(|_| ShelfError::Internal("内部ロックの取得に失敗しました".into()))?;
                 let existing_items = storage::shelf_repo::list_items(&conn)?;
                 drop(conn);
                 commands::shelf::grant_preview_scope(&app_handle, &existing_items);
@@ -167,22 +170,21 @@ pub fn run() {
 
 /// SQLiteファイルの保存先（アプリデータディレクトリ配下）を解決する。
 fn resolve_db_path(app: &tauri::AppHandle) -> Result<PathBuf, ShelfError> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| ShelfError::Internal(format!("アプリデータディレクトリの解決に失敗しました: {e}")))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| ShelfError::Internal(format!("アプリデータディレクトリの作成に失敗しました: {e}")))?;
+    let dir = app.path().app_data_dir().map_err(|e| {
+        ShelfError::Internal(format!("アプリデータディレクトリの解決に失敗しました: {e}"))
+    })?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        ShelfError::Internal(format!("アプリデータディレクトリの作成に失敗しました: {e}"))
+    })?;
     Ok(dir.join("ledge.sqlite3"))
 }
 
 /// クリップボード画像キャッシュ（PNG）の保存先ディレクトリを解決する（requirements.md 10.2章）。
 /// 実際のディレクトリ作成は初回の画像記録時（`clipboard_repo::record_entry`）まで遅延させる。
 fn resolve_clipboard_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, ShelfError> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| ShelfError::Internal(format!("アプリデータディレクトリの解決に失敗しました: {e}")))?;
+    let dir = app.path().app_data_dir().map_err(|e| {
+        ShelfError::Internal(format!("アプリデータディレクトリの解決に失敗しました: {e}"))
+    })?;
     Ok(dir.join("clipboard-cache"))
 }
 
@@ -205,7 +207,9 @@ fn init_logging(app: &tauri::AppHandle) -> Result<(), ShelfError> {
 
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     Ok(())

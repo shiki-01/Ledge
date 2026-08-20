@@ -175,9 +175,10 @@ pub fn reposition(window: &WebviewWindow, app: &AppHandle) {
         ),
     };
 
-    if let Err(e) =
-        window.set_size(PhysicalSize::new(width_physical.max(1) as u32, height_physical.max(1) as u32))
-    {
+    if let Err(e) = window.set_size(PhysicalSize::new(
+        width_physical.max(1) as u32,
+        height_physical.max(1) as u32,
+    )) {
         warn!(error = %e, "シェルフウィンドウのサイズ設定に失敗しました");
     }
     if let Err(e) = window.set_position(PhysicalPosition::new(x, y)) {

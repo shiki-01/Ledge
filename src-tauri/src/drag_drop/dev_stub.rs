@@ -28,7 +28,10 @@ impl DevStubDragOutSource {
 
 impl DragOutSource for DevStubDragOutSource {
     fn begin_drag(&self, paths: Vec<PathBuf>) -> Result<(), ShelfError> {
-        info!(?paths, "dev_stub: begin_drag が呼び出されました（no-op、Linux開発環境）");
+        info!(
+            ?paths,
+            "dev_stub: begin_drag が呼び出されました（no-op、Linux開発環境）"
+        );
         Ok(())
     }
 }

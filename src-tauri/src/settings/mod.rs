@@ -166,15 +166,17 @@ pub fn load_settings(app: &AppHandle) -> Result<AppSettings, ShelfError> {
 /// 設定を`settings.json`へ書き込む。
 pub fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), ShelfError> {
     let store = app.store(STORE_FILE).map_err(store_err)?;
-    let value =
-        serde_json::to_value(settings).map_err(|e| ShelfError::Settings(e.to_string()))?;
+    let value = serde_json::to_value(settings).map_err(|e| ShelfError::Settings(e.to_string()))?;
     store.set(SETTINGS_KEY, value);
     store.save().map_err(store_err)?;
     Ok(())
 }
 
 /// 部分更新を適用して保存する。
-pub fn update_settings(app: &AppHandle, patch: AppSettingsPatch) -> Result<AppSettings, ShelfError> {
+pub fn update_settings(
+    app: &AppHandle,
+    patch: AppSettingsPatch,
+) -> Result<AppSettings, ShelfError> {
     let mut settings = load_settings(app)?;
 
     if let Some(hotkey) = patch.shelf_hotkey {
@@ -295,11 +297,20 @@ mod tests {
         let restored: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.shelf_hotkey, settings.shelf_hotkey);
         assert_eq!(restored.shelf_edge, settings.shelf_edge);
-        assert_eq!(restored.clipboard_max_entries, settings.clipboard_max_entries);
-        assert_eq!(restored.clipboard_retention_days, settings.clipboard_retention_days);
+        assert_eq!(
+            restored.clipboard_max_entries,
+            settings.clipboard_max_entries
+        );
+        assert_eq!(
+            restored.clipboard_retention_days,
+            settings.clipboard_retention_days
+        );
         assert!((restored.opacity - settings.opacity).abs() < f64::EPSILON);
         assert_eq!(restored.autostart_enabled, settings.autostart_enabled);
-        assert_eq!(restored.auto_show_on_drag_start, settings.auto_show_on_drag_start);
+        assert_eq!(
+            restored.auto_show_on_drag_start,
+            settings.auto_show_on_drag_start
+        );
         assert_eq!(restored.sync_enabled, settings.sync_enabled);
         assert_eq!(restored.firebase_api_key, settings.firebase_api_key);
         assert_eq!(restored.firebase_auth_domain, settings.firebase_auth_domain);

@@ -126,7 +126,9 @@ pub fn shelf_copy_path(state: State<'_, AppState>, id: i64) -> Result<(), ShelfE
     };
 
     let mut clipboard = arboard::Clipboard::new().map_err(clipboard_err)?;
-    clipboard.set_text(item.source_path).map_err(clipboard_err)?;
+    clipboard
+        .set_text(item.source_path)
+        .map_err(clipboard_err)?;
     Ok(())
 }
 
@@ -155,9 +157,9 @@ pub fn shelf_compress_item(
     let added = {
         let conn = state.db.0.lock().map_err(lock_err)?;
         let mut added = shelf_repo::add_paths(&conn, &[zip_path_str])?;
-        added
-            .pop()
-            .ok_or_else(|| ShelfError::Internal("圧縮後のシェルフアイテム追加に失敗しました".into()))?
+        added.pop().ok_or_else(|| {
+            ShelfError::Internal("圧縮後のシェルフアイテム追加に失敗しました".into())
+        })?
     };
     grant_preview_scope(&app, std::slice::from_ref(&added));
     notify_items_changed(&app);

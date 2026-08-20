@@ -248,10 +248,7 @@ mod tests {
 
         add_paths(
             &conn,
-            &[
-                "/tmp/dup.txt".to_string(),
-                "/tmp/dup.txt".to_string(),
-            ],
+            &["/tmp/dup.txt".to_string(), "/tmp/dup.txt".to_string()],
         )
         .unwrap();
 
@@ -305,7 +302,8 @@ mod tests {
         let db = setup();
         let conn = db.0.lock().unwrap();
 
-        let added = add_paths(&conn, &["/tmp/a.txt".to_string(), "/tmp/b.txt".to_string()]).unwrap();
+        let added =
+            add_paths(&conn, &["/tmp/a.txt".to_string(), "/tmp/b.txt".to_string()]).unwrap();
         set_locked(&conn, added[0].id, true).unwrap();
 
         clear(&conn, true).unwrap();

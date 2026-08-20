@@ -61,6 +61,10 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), ShelfError> {
     use tauri_plugin_autostart::ManagerExt;
 
     let manager = app.autolaunch();
-    let result = if enabled { manager.enable() } else { manager.disable() };
+    let result = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
     result.map_err(|e| ShelfError::Settings(format!("自動起動設定の変更に失敗しました: {e}")))
 }

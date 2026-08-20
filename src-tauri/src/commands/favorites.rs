@@ -34,7 +34,11 @@ pub fn favorites_add(
 }
 
 #[tauri::command]
-pub fn favorites_remove(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), ShelfError> {
+pub fn favorites_remove(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), ShelfError> {
     {
         let conn = state.db.0.lock().map_err(lock_err)?;
         favorite_folder_repo::remove(&conn, id)?;

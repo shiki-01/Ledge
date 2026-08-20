@@ -62,9 +62,9 @@ fn add_dir_recursive<W: Write + io::Seek>(
     for entry in std::fs::read_dir(dir).map_err(io_err)? {
         let entry = entry.map_err(io_err)?;
         let path = entry.path();
-        let rel_path = path.strip_prefix(base).map_err(|e| {
-            ShelfError::Internal(format!("圧縮対象パスの解決に失敗しました: {e}"))
-        })?;
+        let rel_path = path
+            .strip_prefix(base)
+            .map_err(|e| ShelfError::Internal(format!("圧縮対象パスの解決に失敗しました: {e}")))?;
         // ZIP内のパス区切りは常に`/`にする（Windows由来の`\`区切りをそのまま使わない）
         let rel_str = rel_path.to_string_lossy().replace('\\', "/");
         let entry_name = format!("{root_name}/{rel_str}");

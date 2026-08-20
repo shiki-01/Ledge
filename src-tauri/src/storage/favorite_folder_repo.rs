@@ -42,7 +42,9 @@ pub fn list_items(conn: &Connection) -> Result<Vec<FavoriteFolder>, ShelfError> 
 pub fn add(conn: &Connection, path: &str) -> Result<FavoriteFolder, ShelfError> {
     let folder_path = Path::new(path);
     if !folder_path.is_dir() {
-        return Err(ShelfError::Internal("指定されたパスはフォルダではありません".into()));
+        return Err(ShelfError::Internal(
+            "指定されたパスはフォルダではありません".into(),
+        ));
     }
 
     let display_name = folder_path
@@ -151,8 +153,14 @@ mod tests {
         let path = dir.to_string_lossy().to_string();
 
         let added = add(&conn, &path).unwrap();
-        assert_eq!(added.display_name, dir.file_name().unwrap().to_string_lossy());
-        assert!(!added.missing, "実在するフォルダなのでmissingにならないはず");
+        assert_eq!(
+            added.display_name,
+            dir.file_name().unwrap().to_string_lossy()
+        );
+        assert!(
+            !added.missing,
+            "実在するフォルダなのでmissingにならないはず"
+        );
 
         let items = list_items(&conn).unwrap();
         assert_eq!(items.len(), 1);

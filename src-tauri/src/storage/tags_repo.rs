@@ -27,14 +27,17 @@ pub fn list_tags(conn: &Connection) -> Result<Vec<Tag>, ShelfError> {
 /// タグを作成する。`name`は`UNIQUE`制約があるため、重複時は`ShelfError::Conflict`を返す
 /// （architecture.md 9.3章）。
 pub fn create_tag(conn: &Connection, name: &str, color: Option<&str>) -> Result<Tag, ShelfError> {
-    conn.execute("INSERT INTO tags (name, color) VALUES (?1, ?2)", params![name, color])
-        .map_err(|e| {
-            if is_unique_violation(&e) {
-                ShelfError::Conflict(format!("タグ名「{name}」は既に使用されています"))
-            } else {
-                db_err(e)
-            }
-        })?;
+    conn.execute(
+        "INSERT INTO tags (name, color) VALUES (?1, ?2)",
+        params![name, color],
+    )
+    .map_err(|e| {
+        if is_unique_violation(&e) {
+            ShelfError::Conflict(format!("タグ名「{name}」は既に使用されています"))
+        } else {
+            db_err(e)
+        }
+    })?;
 
     Ok(Tag {
         id: conn.last_insert_rowid(),
@@ -45,7 +48,9 @@ pub fn create_tag(conn: &Connection, name: &str, color: Option<&str>) -> Result<
 
 /// タグを削除する。`clipboard_tags`は`ON DELETE CASCADE`のため関連付けも自動削除される。
 pub fn delete_tag(conn: &Connection, id: i64) -> Result<(), ShelfError> {
-    let affected = conn.execute("DELETE FROM tags WHERE id = ?1", params![id]).map_err(db_err)?;
+    let affected = conn
+        .execute("DELETE FROM tags WHERE id = ?1", params![id])
+        .map_err(db_err)?;
     if affected == 0 {
         return Err(ShelfError::NotFound(format!("tag id={id}")));
     }
@@ -54,7 +59,11 @@ pub fn delete_tag(conn: &Connection, id: i64) -> Result<(), ShelfError> {
 
 /// 指定エントリのタグ付けを一括置換する（差分diffではなく全置換、architecture.md 9.3章:
 /// 「差分diffではなく全置換が実装しやすくバグりにくいための判断」）。
-pub fn set_clipboard_tags(conn: &Connection, clipboard_id: i64, tag_ids: &[i64]) -> Result<(), ShelfError> {
+pub fn set_clipboard_tags(
+    conn: &Connection,
+    clipboard_id: i64,
+    tag_ids: &[i64],
+) -> Result<(), ShelfError> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM clipboard_history WHERE id = ?1)",
@@ -63,11 +72,16 @@ pub fn set_clipboard_tags(conn: &Connection, clipboard_id: i64, tag_ids: &[i64])
         )
         .map_err(db_err)?;
     if !exists {
-        return Err(ShelfError::NotFound(format!("clipboard entry id={clipboard_id}")));
+        return Err(ShelfError::NotFound(format!(
+            "clipboard entry id={clipboard_id}"
+        )));
     }
 
-    conn.execute("DELETE FROM clipboard_tags WHERE clipboard_id = ?1", params![clipboard_id])
-        .map_err(db_err)?;
+    conn.execute(
+        "DELETE FROM clipboard_tags WHERE clipboard_id = ?1",
+        params![clipboard_id],
+    )
+    .map_err(db_err)?;
     for tag_id in tag_ids {
         conn.execute(
             "INSERT INTO clipboard_tags (clipboard_id, tag_id) VALUES (?1, ?2)",
