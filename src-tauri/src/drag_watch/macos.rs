@@ -50,6 +50,21 @@
 //! 必ず`(0,0)`）の高さ（ポイント単位）を使ってy軸を反転して変換している（`to_top_left_points`）。
 //! この座標変換ロジックは実機で未検証であり、他の箇所以上に実機（macOS）での動作確認が必要
 //! （windows.rsやこのファイル冒頭の「検証状況」と同じ扱い、architecture.md 7章）。
+//!
+//! ## ドラッグ用パスボードによる判定の追加について（ウィンドウ移動との誤発火対策）
+//! ユーザー報告「ウィンドウを画面端に持っていくとまだシェルフが出る」への対策。上記のエッジ近傍
+//! 判定はマウス座標だけのヒューリスティックであり、実際にファイル/画像/テキスト等をドラッグ中なのか、
+//! 単にウィンドウをドラッグ移動しているだけなのかを区別できていなかった。`NSPasteboard(name: .drag)`
+//! （`NSPasteboardNameDrag`）はOSレベルのドラッグ操作（`NSDraggingSession`、Finderのファイル
+//! ドラッグ等）が開始されると、そのデータの型がシステム全体で共有されるこのパスボードに登録される
+//! ため`changeCount`が増加する。一方ウィンドウの移動（タイトルバードラッグ）はウィンドウのフレーム
+//! 位置をOSが直接動かすだけでこのパスボードには一切触れない。この違いを利用し、左ボタン押下時点の
+//! `changeCount`を基準値として記録しておき、`.leftMouseDragged`時点でそこから変化していて
+//! （＝実際に何らかのデータが登録されて）かつ登録された型が1つ以上あることを、エッジ近傍判定に加えた
+//! 追加条件として使う（`has_fresh_drag_payload`）。基準値が取得できていない場合は安全側に倒し
+//! 従来通り無条件で発火させる。**この判定が実機のあらゆるアプリのドラッグ操作（Finder以外の
+//! サードパーティアプリ含む）で確実に`changeCount`を更新するかは未検証であり、実機（macOS）での
+//! 動作確認が必要**（windows.rsやこのファイル冒頭の「検証状況」と同じ扱い、architecture.md 7章）。
 
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
@@ -59,7 +74,7 @@ use dispatch2::{run_on_main, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSScreen};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSPasteboard, NSPasteboardNameDrag, NSScreen};
 use objc2_foundation::NSPoint;
 
 use crate::error::ShelfError;
@@ -87,6 +102,12 @@ struct WatcherState {
     /// `HookState::triggered`と同じ役割）。
     triggered: bool,
     edge: Option<EdgeGeometry>,
+    /// このドラッグセッション（左ボタン押下時点）でのドラッグ用パスボード（`NSPasteboard(name: .drag)`）の
+    /// `changeCount`。実際にファイル/画像/テキスト等のドラッグが始まると、AppKitがこの共有パスボードへ
+    /// データを登録するため`changeCount`が増加する。ウィンドウの移動（タイトルバードラッグ）はこの
+    /// パスボードに一切触れないため、`changeCount`が変わらない。これを「本当にコンテンツをドラッグして
+    /// いるか」の判定に使う（ユーザー報告: 「ウィンドウを画面端に持っていくとまだシェルフが出る」への対策）。
+    drag_pasteboard_baseline: Option<isize>,
     on_start: Box<dyn Fn() + Send + Sync>,
     on_end: Box<dyn Fn() + Send + Sync>,
 }
@@ -121,6 +142,7 @@ impl DragWatcher for MacDragWatcher {
             dragging: false,
             triggered: false,
             edge,
+            drag_pasteboard_baseline: None,
             on_start,
             on_end,
         }));
@@ -186,6 +208,7 @@ fn handle_event(state: &Mutex<WatcherState>, event: &NSEvent) {
         guard.down_pos = Some(loc);
         guard.dragging = false;
         guard.triggered = false;
+        guard.drag_pasteboard_baseline = Some(drag_pasteboard_change_count());
     } else if event_type == NSEventType::LeftMouseDragged {
         if guard.triggered {
             return;
@@ -214,6 +237,15 @@ fn handle_event(state: &Mutex<WatcherState>, event: &NSEvent) {
             None => true,
         };
         if !in_zone {
+            return;
+        }
+        // ドラッグ用パスボード判定: 基準値が取得できていない場合は安全側に倒し従来通り発火させる
+        // （ファイル冒頭コメント「ドラッグ用パスボードによる判定の追加について」参照）。
+        let has_payload = match guard.drag_pasteboard_baseline {
+            Some(baseline) => has_fresh_drag_payload(baseline),
+            None => true,
+        };
+        if !has_payload {
             return;
         }
         guard.triggered = true;
@@ -257,6 +289,35 @@ fn in_edge_zone(pt: NSPoint, edge: &EdgeGeometry) -> bool {
         ShelfEdge::Right => pt.x <= max_x && pt.x >= max_x - margin && pt.y >= min_y && pt.y <= max_y,
         ShelfEdge::Top => pt.y >= min_y && pt.y <= min_y + margin && pt.x >= min_x && pt.x <= max_x,
         ShelfEdge::Bottom => pt.y <= max_y && pt.y >= max_y - margin && pt.x >= min_x && pt.x <= max_x,
+    }
+}
+
+/// ドラッグ用パスボード（`NSPasteboard(name: .drag)`）の現在の`changeCount`を取得する
+/// （ファイル冒頭コメント「ドラッグ用パスボードによる判定の追加について」参照）。
+fn drag_pasteboard_change_count() -> isize {
+    // SAFETY: `NSPasteboard::pasteboardWithName`/`changeCount`はどちらもメインスレッド専有では
+    // ない公開APIであり（`clipboard/macos.rs`が背景スレッドから`NSPasteboard::generalPasteboard()`を
+    // 呼んでいるのと同様）、有効な`NSPasteboardNameDrag`を渡す限り安全に呼び出せる。
+    unsafe {
+        let pb = NSPasteboard::pasteboardWithName(NSPasteboardNameDrag);
+        pb.changeCount()
+    }
+}
+
+/// マウス押下時点からドラッグ用パスボードが更新されており（＝実際のドラッグ操作でAppKitが
+/// データを登録した）、かつ何らかの型が実際に登録されているかを判定する。ウィンドウ移動だけの
+/// 場合はこのパスボードに触れないため`changeCount`が変わらず、falseになる。
+fn has_fresh_drag_payload(baseline: isize) -> bool {
+    // SAFETY: `drag_pasteboard_change_count`と同様、任意のスレッドから安全に呼び出せる。
+    unsafe {
+        let pb = NSPasteboard::pasteboardWithName(NSPasteboardNameDrag);
+        if pb.changeCount() == baseline {
+            return false;
+        }
+        match pb.types() {
+            Some(types) => !types.is_empty(),
+            None => false,
+        }
     }
 }
 
