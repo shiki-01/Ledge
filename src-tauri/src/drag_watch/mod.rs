@@ -17,16 +17,54 @@ pub mod macos;
 pub mod windows;
 
 use crate::error::ShelfError;
+use tauri::Manager;
+
+/// F-08のエッジ近傍判定に使う、プライマリディスプレイ作業領域のジオメトリと設定済み表示端。
+/// `window::reposition`が使うのと同じ入力（`AppSettings.shelf_edge`＋`monitor.work_area()`）から
+/// 導出する。座標系は物理px・左上原点（Tauri/winitの慣例、Windows側マウス座標と1:1で一致する）。
+#[derive(Debug, Clone, Copy)]
+pub struct EdgeGeometry {
+    pub edge: crate::settings::ShelfEdge,
+    pub work_area_x: i32,
+    pub work_area_y: i32,
+    pub work_area_width: u32,
+    pub work_area_height: u32,
+    pub scale_factor: f64,
+}
+
+/// 設定済みのシェルフ表示端と、プライマリディスプレイの作業領域ジオメトリを取得する。
+/// `window::reposition`と同じ情報源（`load_settings`＋`primary_monitor().work_area()`）から
+/// 導出する（F-08エッジ近傍判定用）。取得に失敗した場合は`None`を返し、呼び出し元は
+/// 「ゾーン制限なしで常に発火」という従来の挙動へフォールバックすること（安全側に倒し、
+/// 機能そのものを丸ごと止めないため）。
+pub fn compute_edge_geometry(app: &tauri::AppHandle) -> Option<EdgeGeometry> {
+    let settings = crate::settings::load_settings(app).unwrap_or_default();
+    let window = app.get_webview_window(crate::window::MAIN_WINDOW_LABEL)?;
+    let monitor = window.primary_monitor().ok()??;
+    let work_area = *monitor.work_area();
+    Some(EdgeGeometry {
+        edge: settings.shelf_edge,
+        work_area_x: work_area.position.x,
+        work_area_y: work_area.position.y,
+        work_area_width: work_area.size.width,
+        work_area_height: work_area.size.height,
+        scale_factor: monitor.scale_factor(),
+    })
+}
 
 /// ドラッグ開始検知の抽象化。
 ///
 /// `on_start`はヒューリスティックで「ドラッグ操作の可能性が高い」と判定された瞬間に、
 /// `on_end`はドラッグ操作が終了した（ボタンを離した）とみなされた瞬間に呼ばれる。
+/// `edge`は設定済みシェルフ表示端の近傍にカーソルが入った時だけ発火させるためのジオメトリ
+/// （誤検知が多すぎるというユーザー報告への対策、`compute_edge_geometry`参照）。`None`の場合は
+/// 各実装ともゾーン制限なしで常に発火する従来の挙動にフォールバックする。
 pub trait DragWatcher: Send {
     fn start(
         &mut self,
         on_start: Box<dyn Fn() + Send + Sync>,
         on_end: Box<dyn Fn() + Send + Sync>,
+        edge: Option<EdgeGeometry>,
     ) -> Result<(), ShelfError>;
     fn stop(&mut self);
 }
@@ -68,9 +106,11 @@ pub fn set_enabled(
     if enabled {
         let start_handle = app.clone();
         let end_handle = app.clone();
+        let edge = compute_edge_geometry(app);
         guard.start(
             Box::new(move || crate::window::show_shelf_auto(&start_handle)),
             Box::new(move || crate::window::hide_shelf_if_auto(&end_handle)),
+            edge,
         )?;
     }
     Ok(())

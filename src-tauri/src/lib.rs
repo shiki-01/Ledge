@@ -79,9 +79,11 @@ pub fn run() {
             if settings.auto_show_on_drag_start {
                 let start_handle = app_handle.clone();
                 let end_handle = app_handle.clone();
+                let edge = drag_watch::compute_edge_geometry(&app_handle);
                 drag_watcher.start(
                     Box::new(move || window::show_shelf_auto(&start_handle)),
                     Box::new(move || window::hide_shelf_if_auto(&end_handle)),
+                    edge,
                 )?;
             }
 

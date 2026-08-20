@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import ShelfItem from "./ShelfItem.svelte";
   import FavoriteFolders from "./FavoriteFolders.svelte";
   import { shelfStore } from "../stores/shelfStore";
@@ -15,6 +16,41 @@
   let isDraggingOver = $state(false);
   let errorMessage = $state<string | null>(null);
   let errorTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // F-03: シェルフからのドラッグアウト中は、送り出し中の自分自身へのOSドロップ通知
+  // （送信元と受信先が同一ウィンドウという構造上、送り出し直後にOSが自己ドロップとして
+  // 検知することがある）を無視するためのフラグ。`shelf://drag-out-ended`（Rust側の
+  // `drag::start_drag`完了コールバック）を受け取るまでtrueのままにする。
+  let isDraggingOutSelf = $state(false);
+  let dragOutSafetyTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // `shelf://drag-out-ended`が何らかの理由で届かなかった場合の保険。一定時間後に自動で
+  // `isDraggingOutSelf`を解除する（イベントが正常に届いた場合はclearTimeoutでキャンセルする）。
+  const DRAG_OUT_SAFETY_TIMEOUT_MS = 30_000;
+
+  function scheduleDragOutSafetyReset(): void {
+    clearTimeout(dragOutSafetyTimer);
+    dragOutSafetyTimer = setTimeout(() => {
+      isDraggingOutSelf = false;
+    }, DRAG_OUT_SAFETY_TIMEOUT_MS);
+  }
+
+  // F-03: ネイティブドラッグ操作の終了通知を購読し、自己ドロップ無視フラグを解除する
+  // （既存の"shelf://open-settings"等の購読パターン、App.svelteに揃えた）。
+  $effect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    void listen("shelf://drag-out-ended", () => {
+      clearTimeout(dragOutSafetyTimer);
+      isDraggingOutSelf = false;
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  });
 
   function showError(e: unknown): void {
     errorMessage = isShelfErrorPayload(e) ? e.message : "予期しないエラーが発生しました";
@@ -36,9 +72,15 @@
         switch (payload.type) {
           case "enter":
           case "over":
+            // F-03自己ドロップガード: 送り出し中の自分自身へのドロップ候補通知は無視する。
+            if (isDraggingOutSelf) break;
             isDraggingOver = true;
             break;
           case "drop":
+            // F-03自己ドロップガード: シェルフからのドラッグアウト完了直後、OSが送り出し中の
+            // ドラッグを自分自身へのドロップとして検知することがあるため無視する
+            // （`isDraggingOutSelf`、`handleDragOut`参照）。
+            if (isDraggingOutSelf) break;
             isDraggingOver = false;
             void handleDrop(payload.paths);
             break;
@@ -82,9 +124,13 @@
   }
 
   async function handleDragOut(id: number): Promise<void> {
+    isDraggingOutSelf = true;
+    scheduleDragOutSafetyReset();
     try {
       await shelfBeginDragOut([id]);
     } catch (e) {
+      clearTimeout(dragOutSafetyTimer);
+      isDraggingOutSelf = false; // コマンド自体が失敗した場合はOSドラッグが開始していないので即座に解除する
       showError(e);
     }
   }

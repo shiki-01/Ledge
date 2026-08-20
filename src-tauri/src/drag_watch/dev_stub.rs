@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::error::ShelfError;
 
-use super::DragWatcher;
+use super::{DragWatcher, EdgeGeometry};
 
 pub struct DevStubDragWatcher;
 
@@ -28,6 +28,7 @@ impl DragWatcher for DevStubDragWatcher {
         &mut self,
         _on_start: Box<dyn Fn() + Send + Sync>,
         _on_end: Box<dyn Fn() + Send + Sync>,
+        _edge: Option<EdgeGeometry>,
     ) -> Result<(), ShelfError> {
         info!("dev_stub: ドラッグ開始検知の監視を開始しました（no-op）");
         Ok(())

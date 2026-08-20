@@ -199,6 +199,7 @@ pub trait DragOutSource: Send {
 
 - **実装方針（技術選定の補足）**: `requirements.md` 5章は「windows-rs（COM/IDropTarget）」「NSPasteboard/NSDraggingSession」を明記しているが、これをフルスクラッチで実装するとCOMのIDropSource/IDataObject実装やNSDraggingSource準拠のObjective-C連携など、実装コストとバグ面のリスクが大きい。そこで**`tauri-plugin-drag`（crabnebula製）を第一候補として採用**する。内部的には同じOS APIを使っており、要件の技術選定と矛盾しない。trait越しに呼んでいるため、将来カスタムのドラッグプレビュー画像合成等が必要になれば`native.rs`の中身だけ差し替えれば良い
 - 受け入れ側（F-02のシェルフへのドロップ）はTauri v2の組み込みドラッグ&ドロップイベント（`dragDropEnabled` + `onDragDropEvent`）で完結し、独自のCOM/NSPasteboardコードは不要
+- **自己ドロップガード**: シェルフウィンドウ自体が`dragDropEnabled: true`でOSレベルのドロップ先としても登録されており、かつシェルフは画面端に薄くドッキングしているため、ドラッグアウト開始直後にカーソルがまだシェルフウィンドウの境界付近/内側にある間、OSが「送り出し中のドラッグ」を自分自身への「ドロップ候補」として検知することがある。対策として、`begin_drag`（`drag::start_drag`）の完了コールバックでネイティブドラッグの終了をTauriイベント`shelf://drag-out-ended`としてフロントへ通知し、フロント側（`Shelf.svelte`）は`shelfBeginDragOut`呼び出しから当該イベント受信までを`isDraggingOutSelf`フラグで管理して、その間の`onDragDropEvent`（enter/over/drop）を無視する。イベントが届かない場合の保険として30秒の安全タイマーも併設する
 
 ---
 
@@ -238,6 +239,7 @@ Windowsには「OS全体でドラッグ操作が始まったこと」を通知�
 - 判定ロジック: マウス左ボタン押下位置から一定距離（既定8px、DPI非依存の論理px換算）以上移動した状態が続いたらシェルフを表示。ボタンを離す（`WM_LBUTTONUP`相当）か、一定時間（既定800ms）操作が無ければ自動的に表示状態を解除して良い（ユーザーが明示的にシェルフを開いていた場合はこの自動非表示の対象外にする＝ホットキーで開いた状態と自動表示状態を区別するフラグを持つ）
 - 実装は`WH_MOUSE_LL`フック用のメッセージ専用スレッド上で行い、UIスレッドをブロックしないようチャネル経由でメインスレッドへ通知する
 - macOS側（F-08 Mac）はPhase5で別途検討する（Accessibility API依存が濃厚なため要調査。本フェーズでは着手しない）
+- **エッジ近傍判定の追加**: 上記ヒューリスティックだけでは画面上のどこでクリック&ドラッグしても（無関係な操作やウィンドウ移動でも）反応してしまい邪魔、というユーザー報告があったため、「設定済みのシェルフ表示端（`AppSettings.shelf_edge`）に近いエリアに入った時だけ」発火するよう変更した。境界からのマージンは既定32論理px相当（`EDGE_ZONE_MARGIN_LOGICAL_PX`、8px移動しきい値より余裕を持たせた値）とし、ジオメトリ（`window::reposition`と同じ入力から導出する`EdgeGeometry`）の取得に失敗した場合は安全側に倒しゾーン制限なしで従来通り発火する
 
 ### 8.2 F-10（表示位置/透明度設定）のスコープ
 
@@ -296,6 +298,7 @@ Phase2で`clipboard_list_history(query)`は既にLIKE検索を受け付けてい
 - **権限要件**: `NSEvent`のグローバルモニタは、自プロセスにフォーカスが無い他アプリのイベントを監視するため、**「アクセシビリティ」権限**（`System Settings > Privacy & Security > Accessibility`）の許可が必要になる（macOS本体のAPI仕様上の制約であり、実装方式を変えても回避できない）。これはPrivate API依存ではなく公開APIの正規の権限モデルであるため、Mac App Store外の直接配布（`requirements.md` 8章で既に前提としている方針）であれば実装上の制約にはならない
 - **初回起動時のUX**: 権限が無い状態では`NSEvent`のグローバルモニタはイベントを一切受け取れない（エラーにはならず単に発火しない）ため、初回起動時に権限が付与されているかを`AXIsProcessTrusted()`で確認し、無ければ設定画面へ誘導するアラートを表示する設計とする（Windows版には無い、macOS固有の追加UI）
 - **未検証である旨**: 本リポジトリの開発コンテナはLinuxのためこのコードはコンパイル対象外であり、実機（macOS）での動作確認ができていない。Windows版と同様、静的レビューのみで実装する
+- **エッジ近傍判定の追加**: Windows版（8.1章）と同じ理由（誤検知が多すぎるというユーザー報告）で、設定済みのシェルフ表示端に近いエリアに入った時だけ発火するよう変更した。マージンはWindows版と同じ既定32ポイント相当（`EDGE_ZONE_MARGIN_POINTS`）。`NSEvent.locationInWindow()`が返す座標系（左下原点・y上向き・ポイント単位）と`EdgeGeometry`の座標系（左上原点・y下向き・物理px）が異なるため、プライマリディスプレイ（`NSScreen.screens()`の先頭要素）の高さを使ったy軸反転変換が必要になる。この座標変換は今回追加した中で最もリスクが高い箇所であり、実機（macOS）での重点的な検証が必要
 
 ### 10.2 F-22（デバイス間同期）— Bring Your Own Firebase方式
 

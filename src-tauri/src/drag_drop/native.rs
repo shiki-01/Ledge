@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tracing::debug;
 
 use crate::error::ShelfError;
@@ -46,12 +46,19 @@ impl DragOutSource for NativeDragOutSource {
             .map_err(|e| ShelfError::DragDropFailed(e.to_string()))?;
 
         let callback_paths = paths.clone();
+        // ドラッグ操作が実際に終了したことをフロントエンドへ通知する（F-03「自己ドロップ」ガード用）。
+        // `begin_drag`自体は`drag::start_drag`呼び出し直後に返るため、フロント側の
+        // `await shelfBeginDragOut(...)`はOSドラッグが実際に終わるずっと前に解決してしまう。
+        // このイベントが、フロント側がOSドラッグの終了を知る唯一の手段になる
+        // （`src/lib/components/Shelf.svelte`の`isDraggingOutSelf`参照）。
+        let app_handle = self.app_handle.clone();
         drag::start_drag(
             &window,
             drag::DragItem::Files(paths),
             drag::Image::File(icon_path),
             move |result, _cursor_pos| {
                 debug!(?result, paths = ?callback_paths, "ネイティブドラッグ操作が終了しました");
+                let _ = app_handle.emit("shelf://drag-out-ended", ());
             },
             drag::Options::default(),
         )

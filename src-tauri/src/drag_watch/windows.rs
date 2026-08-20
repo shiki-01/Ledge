@@ -15,6 +15,13 @@
 //! 無ければ自動的に表示状態を解除して**良い**」と許容的に書いており必須要件ではないため、
 //! タイマーによる無操作タイムアウト解除は実装せず、「ボタンを離す」ことのみを終了条件とする
 //! 簡易実装とした。
+//!
+//! ## エッジ近傍判定の追加について
+//! 当初は「左ボタン押下→一定距離以上の移動」だけでシェルフを自動表示していたが、画面上のどこで
+//! クリック&ドラッグしても（無関係な操作やウィンドウ移動でも）反応してしまい邪魔、という
+//! ユーザー報告があった。対策として、設定済みのシェルフ表示端（`AppSettings.shelf_edge`）に近い
+//! エリアに入った時だけ発火するよう変更した（`EdgeGeometry`, `in_edge_zone`）。ジオメトリの取得に
+//! 失敗した場合（`edge: None`）は、安全側に倒し従来通り無条件で発火する。
 
 use std::sync::{Mutex, OnceLock};
 
@@ -28,10 +35,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::error::ShelfError;
 
-use super::DragWatcher;
+use super::{DragWatcher, EdgeGeometry};
 
 /// ドラッグ開始とみなす移動距離（論理px換算、architecture.md 8.1章の既定値）。
 const DRAG_THRESHOLD_LOGICAL_PX: f64 = 8.0;
+
+/// エッジ近傍判定に使う、画面端からのマージン（論理px換算）。8px移動しきい値より少し余裕を
+/// 持たせた値。誤検知/検知漏れのバランスを見ながら将来調整可能（architecture.md 8.1章）。
+const EDGE_ZONE_MARGIN_LOGICAL_PX: f64 = 32.0;
 
 /// フックプロシージャ（`unsafe extern "system" fn`、ユーザーデータポインタを直接渡せない）から
 /// アクセスするための共有状態。プロセス内に1インスタンスのみを想定する
@@ -40,6 +51,11 @@ const DRAG_THRESHOLD_LOGICAL_PX: f64 = 8.0;
 struct HookState {
     down_pos: Option<POINT>,
     dragging: bool,
+    /// このドラッグセッション（押下〜離すまで）で既に`on_start`を呼んだか。
+    /// エッジゾーン外にいる間は`dragging`がtrueになっても`on_start`を呼ばないため、
+    /// `dragging`とは別に管理する。
+    triggered: bool,
+    edge: Option<EdgeGeometry>,
     on_start: Box<dyn Fn() + Send + Sync>,
     on_end: Box<dyn Fn() + Send + Sync>,
 }
@@ -78,6 +94,7 @@ impl DragWatcher for WindowsDragWatcher {
         &mut self,
         on_start: Box<dyn Fn() + Send + Sync>,
         on_end: Box<dyn Fn() + Send + Sync>,
+        edge: Option<EdgeGeometry>,
     ) -> Result<(), ShelfError> {
         // HOOK_STATEはOnceLockのため2回目以降のstart()では上書きされない。stop()を挟まず
         // start()を連続で呼ぶ運用は想定していない（drag_watch::set_enabledは必ずstop()してから
@@ -85,6 +102,8 @@ impl DragWatcher for WindowsDragWatcher {
         let _ = HOOK_STATE.set(Mutex::new(HookState {
             down_pos: None,
             dragging: false,
+            triggered: false,
+            edge,
             on_start,
             on_end,
         }));
@@ -192,34 +211,83 @@ fn handle_event(msg: u32, pt: POINT) {
     if msg == WM_LBUTTONDOWN {
         state.down_pos = Some(pt);
         state.dragging = false;
+        state.triggered = false;
     } else if msg == WM_MOUSEMOVE {
-        if state.dragging {
+        if state.triggered {
             return;
         }
-        let Some(down_pos) = state.down_pos else {
-            return;
-        };
-        let dx = (pt.x - down_pos.x) as f64;
-        let dy = (pt.y - down_pos.y) as f64;
-        let distance = (dx * dx + dy * dy).sqrt();
-        if distance >= threshold_physical_px() {
-            state.dragging = true;
-            drop(state);
-            unsafe {
-                let _ = PostThreadMessageW(self_thread_id, WM_APP_DRAG_START, WPARAM(0), LPARAM(0));
+        if !state.dragging {
+            let Some(down_pos) = state.down_pos else {
+                return;
+            };
+            let dx = (pt.x - down_pos.x) as f64;
+            let dy = (pt.y - down_pos.y) as f64;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance >= threshold_physical_px() {
+                state.dragging = true;
             }
         }
+        if !state.dragging {
+            return;
+        }
+        // エッジ近傍判定: ジオメトリ取得に失敗している場合（edge: None）は安全側に倒し
+        // 従来通り無条件で発火する。
+        let in_zone = match &state.edge {
+            Some(edge) => in_edge_zone(pt, edge),
+            None => true,
+        };
+        if !in_zone {
+            return;
+        }
+        state.triggered = true;
+        drop(state);
+        unsafe {
+            let _ = PostThreadMessageW(self_thread_id, WM_APP_DRAG_START, WPARAM(0), LPARAM(0));
+        }
     } else if msg == WM_LBUTTONUP {
-        let was_dragging = state.dragging;
+        let was_triggered = state.triggered;
         state.down_pos = None;
         state.dragging = false;
+        state.triggered = false;
         drop(state);
-        if was_dragging {
+        if was_triggered {
             unsafe {
                 let _ = PostThreadMessageW(self_thread_id, WM_APP_DRAG_END, WPARAM(0), LPARAM(0));
             }
         }
     }
+}
+
+/// カーソル位置（物理px、スクリーン座標）が、設定済みシェルフ表示端の近傍ゾーン内にあるかを判定する。
+fn in_edge_zone(pt: POINT, edge: &EdgeGeometry) -> bool {
+    let margin = margin_physical_px(edge.scale_factor).round() as i32;
+    let min_x = edge.work_area_x;
+    let min_y = edge.work_area_y;
+    let max_x = edge.work_area_x + edge.work_area_width as i32;
+    let max_y = edge.work_area_y + edge.work_area_height as i32;
+    match edge.edge {
+        crate::settings::ShelfEdge::Left => {
+            pt.x >= min_x && pt.x <= min_x + margin && pt.y >= min_y && pt.y <= max_y
+        }
+        crate::settings::ShelfEdge::Right => {
+            pt.x <= max_x && pt.x >= max_x - margin && pt.y >= min_y && pt.y <= max_y
+        }
+        crate::settings::ShelfEdge::Top => {
+            pt.y >= min_y && pt.y <= min_y + margin && pt.x >= min_x && pt.x <= max_x
+        }
+        crate::settings::ShelfEdge::Bottom => {
+            pt.y <= max_y && pt.y >= max_y - margin && pt.x >= min_x && pt.x <= max_x
+        }
+    }
+}
+
+/// エッジゾーンのマージン（論理px）を物理px換算する。`EdgeGeometry.scale_factor`（Tauriの
+/// monitor APIから取得した値）を使う。`threshold_physical_px`が使う`GetDpiForSystem`ベースの
+/// スケール値と厳密には別経路の値だが、通常はどちらもプライマリディスプレイのDPIから算出される
+/// ため実用上の差異は無い想定（呼び出し元への報告事項: 迷った設計判断。ズレが気になる場合は
+/// 将来どちらかに統一する余地がある）。
+fn margin_physical_px(scale_factor: f64) -> f64 {
+    EDGE_ZONE_MARGIN_LOGICAL_PX * scale_factor
 }
 
 fn invoke_on_start() {

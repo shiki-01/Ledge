@@ -39,6 +39,17 @@
 //! `removeMonitor`, `NSEvent::r#type`, `NSEvent::locationInWindow`, `dispatch2::run_on_main`,
 //! `dispatch2::MainThreadBound`等）が実際に存在し型が一致することは確認済み。とはいえ実機ビルドでの
 //! 最終確認は必要（windows.rsと同じ扱い、architecture.md 7章）。
+//!
+//! ## エッジ近傍判定の追加について（座標変換、実機未検証のリスクが最も高い箇所）
+//! Windows版と同じ理由（画面上のどこでクリック&ドラッグしても反応してしまい邪魔、という
+//! ユーザー報告）で、設定済みのシェルフ表示端（`AppSettings.shelf_edge`）に近いエリアに入った時
+//! だけ発火するよう変更した。`NSEvent.locationInWindow()`はグローバルモニタ（windowがnil）の
+//! イベントでは、AppKitネイティブの座標系（**左下原点・y上向き・ポイント単位**）でスクリーン座標を
+//! 返す一方、`EdgeGeometry`はTauri/winit流（**左上原点・y下向き・物理px**）であり、両者の座標系が
+//! 異なる。プライマリディスプレイ（メニューバーがある画面、`NSScreen.screens()`の先頭要素、原点は
+//! 必ず`(0,0)`）の高さ（ポイント単位）を使ってy軸を反転して変換している（`to_top_left_points`）。
+//! この座標変換ロジックは実機で未検証であり、他の箇所以上に実機（macOS）での動作確認が必要
+//! （windows.rsやこのファイル冒頭の「検証状況」と同じ扱い、architecture.md 7章）。
 
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
@@ -48,16 +59,22 @@ use dispatch2::{run_on_main, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSScreen};
 use objc2_foundation::NSPoint;
 
 use crate::error::ShelfError;
+use crate::settings::ShelfEdge;
 
-use super::DragWatcher;
+use super::{DragWatcher, EdgeGeometry};
 
 /// ドラッグ開始とみなす移動距離（ポイント単位。Windows版`DRAG_THRESHOLD_LOGICAL_PX`と同じ既定値、
 /// architecture.md 10.1章・8.1章）。
 const DRAG_THRESHOLD_POINTS: f64 = 8.0;
+
+/// エッジ近傍判定に使う、画面端からのマージン（ポイント単位）。Windows版
+/// `EDGE_ZONE_MARGIN_LOGICAL_PX`と同じ既定値。マージンはポイント単位でそのまま使うため
+/// DPI換算は不要（ファイル冒頭コメント参照）。
+const EDGE_ZONE_MARGIN_POINTS: f64 = 32.0;
 
 /// イベントハンドラのクロージャ内からアクセスするための共有状態
 /// （windows.rsの`HookState`と同じ設計だが、こちらはインスタンスごとの`Arc<Mutex<_>>`で持つ。
@@ -66,6 +83,10 @@ const DRAG_THRESHOLD_POINTS: f64 = 8.0;
 struct WatcherState {
     down_pos: Option<NSPoint>,
     dragging: bool,
+    /// このドラッグセッション（押下〜離すまで）で既に`on_start`を呼んだか（windows.rsの
+    /// `HookState::triggered`と同じ役割）。
+    triggered: bool,
+    edge: Option<EdgeGeometry>,
     on_start: Box<dyn Fn() + Send + Sync>,
     on_end: Box<dyn Fn() + Send + Sync>,
 }
@@ -93,10 +114,13 @@ impl DragWatcher for MacDragWatcher {
         &mut self,
         on_start: Box<dyn Fn() + Send + Sync>,
         on_end: Box<dyn Fn() + Send + Sync>,
+        edge: Option<EdgeGeometry>,
     ) -> Result<(), ShelfError> {
         let state = Arc::new(Mutex::new(WatcherState {
             down_pos: None,
             dragging: false,
+            triggered: false,
+            edge,
             on_start,
             on_end,
         }));
@@ -141,12 +165,17 @@ fn register_monitor(
 }
 
 /// マウスイベントに応じて状態を更新し、しきい値を超えた/ボタンが離された時点でコールバックを呼ぶ
-/// （windows.rsの`handle_event`と同じロジック、architecture.md 10.1章）。
+/// （windows.rsの`handle_event`と同じロジック、architecture.md 10.1章）。エッジ近傍判定
+/// （ファイル冒頭コメント参照）を追加したため、しきい値を超えた後さらにゾーン内かどうかを見てから
+/// `on_start`を呼ぶ。
 ///
 /// NSEventのグローバルモニタのハンドラはメインスレッド（run loopを回しているスレッド）上で
 /// 直接呼ばれるため、Windows版（`WH_MOUSE_LL`のタイムアウト制約を避けるためカスタムスレッド
 /// メッセージ経由でメインスレッドへ処理を渡していた）と異なり、コールバックをここで直接呼んで
-/// 問題ない。
+/// 問題ない。同じ理由で、ゾーン判定に必要な`MainThreadMarker`もこの関数内で`MainThreadMarker::new()`
+/// により直接取得できる（`register_monitor`から`mtm`を明示的に受け渡す設計も検討したが、
+/// 呼び出し元がメインスレッドであることは既に保証されているためこちらを選んだ。
+/// 呼び出し元への報告事項: 迷った設計判断）。
 fn handle_event(state: &Mutex<WatcherState>, event: &NSEvent) {
     let event_type = unsafe { event.r#type() };
     let loc = unsafe { event.locationInWindow() };
@@ -156,27 +185,78 @@ fn handle_event(state: &Mutex<WatcherState>, event: &NSEvent) {
     if event_type == NSEventType::LeftMouseDown {
         guard.down_pos = Some(loc);
         guard.dragging = false;
+        guard.triggered = false;
     } else if event_type == NSEventType::LeftMouseDragged {
-        if guard.dragging {
+        if guard.triggered {
             return;
         }
-        let Some(down_pos) = guard.down_pos else {
+        if !guard.dragging {
+            let Some(down_pos) = guard.down_pos else {
+                return;
+            };
+            let dx = loc.x - down_pos.x;
+            let dy = loc.y - down_pos.y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance >= DRAG_THRESHOLD_POINTS {
+                guard.dragging = true;
+            }
+        }
+        if !guard.dragging {
             return;
+        }
+        // エッジ近傍判定: ジオメトリ取得に失敗している場合（edge: None）、あるいはメインスレッド
+        // マーカー/スクリーン情報が取得できなかった場合は安全側に倒し従来通り無条件で発火する。
+        let in_zone = match &guard.edge {
+            Some(edge) => MainThreadMarker::new()
+                .and_then(|mtm| to_top_left_points(loc, mtm))
+                .map(|pt| in_edge_zone(pt, edge))
+                .unwrap_or(true),
+            None => true,
         };
-        let dx = loc.x - down_pos.x;
-        let dy = loc.y - down_pos.y;
-        let distance = (dx * dx + dy * dy).sqrt();
-        if distance >= DRAG_THRESHOLD_POINTS {
-            guard.dragging = true;
-            (guard.on_start)();
+        if !in_zone {
+            return;
         }
+        guard.triggered = true;
+        (guard.on_start)();
     } else if event_type == NSEventType::LeftMouseUp {
-        let was_dragging = guard.dragging;
+        let was_triggered = guard.triggered;
         guard.down_pos = None;
         guard.dragging = false;
-        if was_dragging {
+        guard.triggered = false;
+        if was_triggered {
             (guard.on_end)();
         }
+    }
+}
+
+/// AppKitのグローバル座標（左下原点・y上向き・ポイント単位）を、Tauri/winit流の座標系
+/// （左上原点・y下向き）へ変換する（ポイント単位のまま。物理pxへの換算は`in_edge_zone`側で行う）。
+/// プライマリディスプレイ（`NSScreen.screens()`の先頭要素、原点は必ず`(0,0)`）の高さを使って
+/// y軸を反転する。
+fn to_top_left_points(loc: NSPoint, mtm: MainThreadMarker) -> Option<NSPoint> {
+    let screens = NSScreen::screens(mtm);
+    let primary = screens.firstObject()?;
+    let height = primary.frame().size.height;
+    Some(NSPoint {
+        x: loc.x,
+        y: height - loc.y,
+    })
+}
+
+/// カーソル位置（左上原点・y下向き・ポイント単位）が、設定済みシェルフ表示端の近傍ゾーン内に
+/// あるかを判定する（windows.rsの`in_edge_zone`と同じ考え方）。`EdgeGeometry`は物理px・
+/// `scale_factor`付きのため、比較の前にポイント単位へ変換する。
+fn in_edge_zone(pt: NSPoint, edge: &EdgeGeometry) -> bool {
+    let min_x = edge.work_area_x as f64 / edge.scale_factor;
+    let min_y = edge.work_area_y as f64 / edge.scale_factor;
+    let max_x = min_x + edge.work_area_width as f64 / edge.scale_factor;
+    let max_y = min_y + edge.work_area_height as f64 / edge.scale_factor;
+    let margin = EDGE_ZONE_MARGIN_POINTS;
+    match edge.edge {
+        ShelfEdge::Left => pt.x >= min_x && pt.x <= min_x + margin && pt.y >= min_y && pt.y <= max_y,
+        ShelfEdge::Right => pt.x <= max_x && pt.x >= max_x - margin && pt.y >= min_y && pt.y <= max_y,
+        ShelfEdge::Top => pt.y >= min_y && pt.y <= min_y + margin && pt.x >= min_x && pt.x <= max_x,
+        ShelfEdge::Bottom => pt.y <= max_y && pt.y >= max_y - margin && pt.x >= min_x && pt.x <= max_x,
     }
 }
 
