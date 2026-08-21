@@ -11,8 +11,9 @@ Ledge（Windows / macOS両対応のファイル一時置き場＋クリップボ
 
 ## 現状（重要）
 
-**2026-08-19時点、このプロジェクトはPhase未着手**（`src/`・`src-tauri/`とも未作成、`package.json` /
-`Cargo.toml` も存在しない）。テストフレームワークも当然未導入。
+**2026-08-21時点、実装（Phase 1〜6）は完了しているが、テストフレームワークは未導入**
+（`src/` にテストファイル0件、`src-tauri/Cargo.toml` に `[dev-dependencies]` なし、`package.json` にも
+テストスクリプト無し）。
 
 依頼を受けたら、まず `package.json` の `devDependencies` / テストスクリプト、`src-tauri/Cargo.toml` の
 `[dev-dependencies]` の有無を確認すること。両方またはどちらかが未導入の場合は、**勝手に選定・追加しない**。

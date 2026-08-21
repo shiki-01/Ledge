@@ -9,21 +9,14 @@ Ledge（Windows / macOS両対応のファイル一時置き場＋クリップボ
 **走らせて結果を要約するだけ**。コードは一切直さない。修正方針も提案しない。
 原因の推測もしない——ログが示す事実だけを報告する。
 
-## 現状（重要）
+## 走らせるコマンド
 
-**2026-08-19時点、このプロジェクトはPhase未着手**（`src/`・`src-tauri/`とも未作成、`package.json` /
-`Cargo.toml` も存在しない）。以下のコマンドは実行できない。まず両ファイルの有無を確認し、
-存在しなければ「実装未着手のため実行不可」とだけ報告して終了する。
-
-## 走らせるコマンド（`package.json` / `Cargo.toml` 作成後に有効）
-
-CLAUDE.md「開発コマンド」節が正。以下は実装開始時点で想定される構成であり、実際のスクリプト名は
-`package.json` の `scripts` を確認して読み替えること。
+実際のスクリプトは `package.json` の `scripts` を確認して読み替えること（変更されることがあるため、
+このファイルの記載より `package.json` の実物を優先する）。2026-08-21時点で確認済みの構成：
 
 ```sh
 # フロントエンド（Svelte5 + TypeScript）
-npm run lint          # 存在すれば（ESLint等）
-npx svelte-check      # 型チェック（TypeScript + Svelteテンプレート）
+npm run check         # svelte-check（型チェック。TypeScript + Svelteテンプレート）
 npm run tauri build   # 本番ビルドが通るか（フロント+Rustを含む）
 
 # バックエンド（Rust / src-tauri/）
@@ -31,10 +24,12 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml
 ```
 
-どれを走らせるか指示が無ければ、存在するものは**すべて**実行する。`package.json` に `scripts.lint` が
-無い等、コマンド自体が存在しない場合は「該当スクリプト無し」と報告し、推測で別コマンドを実行しない。
+`npm run lint` 相当のスクリプトは2026-08-21時点で存在しない。無いものを推測で別コマンドに
+読み替えて実行しない。指示が無ければ、存在するものは**すべて**実行する。`package.json` にスクリプトが
+無い場合は「該当スクリプト無し」と報告し、推測で別コマンドを実行しない。
 
-テストフレームワークは2026-08-19時点で未導入。導入されたらこのファイルにコマンドを追記する想定。
+テストフレームワークは2026-08-21時点で未導入（`src/` にテストファイル0件、`src-tauri/Cargo.toml` に
+`[dev-dependencies]` なし）。導入されたらこのファイルにコマンドを追記する想定。
 導入前に「テストを走らせて」と依頼された場合は、実行せず「テストフレームワーク未導入」と報告する。
 
 ## 注意

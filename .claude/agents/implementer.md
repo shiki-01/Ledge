@@ -42,17 +42,21 @@ Ledge（Windows / macOS両対応のファイル一時置き場＋クリップボ
 
 ## 終わったら必ず通すもの
 
-CLAUDE.md「開発コマンド」節が正。2026-08-19時点では以下のみ記載されている（実装開始時に更新予定）：
+CLAUDE.md「開発コマンド」節を確認するが、2026-08-21時点でこの節はまだ `npm run tauri dev` /
+`npm run tauri build` のみのseed状態で、実装済みの検証コマンドが反映されていない。節の記述と
+`package.json` の実際の `scripts` が食い違う場合は `package.json` を優先し、その食い違いを
+「気付いたが直さなかったこと」として報告する（CLAUDE.mdへの追記は呼び出し元の判断）。
+
+2026-08-21時点で確認できるコマンド：
 
 ```sh
-npm run tauri dev     # 開発サーバー起動
-npm run tauri build   # ビルド
+npm run check                                       # svelte-check（型チェック）
+npm run tauri build                                 # ビルド
+cargo check --manifest-path src-tauri/Cargo.toml    # Rust側コンパイル確認
+cargo clippy --manifest-path src-tauri/Cargo.toml   # Rust側lint
 ```
 
-lint・型チェックのコマンドはまだCLAUDE.mdに定義されていない。`package.json` に `scripts.lint` や
-`svelte-check` 等が整備されていれば実行し、無ければ「lint/型チェックコマンド未整備」と報告する
-（CLAUDE.mdへの追記は呼び出し元の判断に委ねる）。Rust側は最低限 `cargo check --manifest-path
-src-tauri/Cargo.toml` を通す。
+テストフレームワークは未導入（テストコマンドは無い）。
 
 **通らない状態で返さない。** どうしても通せないなら、通らない理由と失敗の出力を報告する。
 
